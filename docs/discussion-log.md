@@ -48,6 +48,21 @@
 - 复测：64km/h 松油后俯仰峰值 2.4°，平稳刹停。
 - 回归防护：`pnpm smoke` 新增“全油门 2s + 松油 4s 不翻车（up.y > 0.5）”“倒车 1s 速度 < 4m/s”“倒车最高速度 < 8.5m/s”断言（simple/complex 均覆盖）。
 
+## 2026-08-11 弯道脱轨无碰撞 / 到终点不结束（同日第四次修复）
+- 弯道脱轨无碰撞，根因三处：
+  1. 护栏太薄（0.35m）且 cannon-es 无 CCD，高速时车会穿透护栏。修复：护栏厚度 0.35 → 0.55（`src/config.ts`），护栏段长 ×1.4 让相邻段重叠、消除弯道外侧缝隙（`src/track/generator.ts`）。
+  2. 物理子步实验结论：1/120s 子步会导致 RaycastVehicle 松油俯仰失稳翻车，恢复 1/60s 固定子步（`src/physics/vehicle.ts`，注释已记录）。
+  3. 脱轨判定余量太宽（0.8m/0.6s），开下路面没有反应。收紧为 0.5m/0.4s（`src/config.ts`）。
+- 新增碰撞反馈：撞护栏（法向冲击 > 6 m/s）触发镜头震动 + 红色闪屏（`src/physics/vehicle.ts` 的 `onBarrierCollide` + `src/game/Game.ts` + `src/styles.css`）。
+- 到终点不结束，根因：冲线判断 `lastS > 0.85L && s < 0.15L` 在判断前已把 `lastS` 更新为 `s`，条件永不成立（死代码）。修复：提取纯函数 `updateLapProgress`（`src/game/lapProgress.ts`），先判冲线再更新 `lastS`。
+- 回归防护：`pnpm smoke` 新增“冲线检测/中途不冲线/倒退不累计进度”“高速右转不穿护栏（横向距离 < 护栏线 +1.2m）”断言。
+
+## 2026-08-11 倒车加速度 / 刹车前翻（同日第五次修复）
+- 倒车加速度调大：`REVERSE_FORCE_RATIO` 0.35 → 0.5（倒车约 5.8 m/s²，约为前进的一半），最高倒车速度仍 8 m/s（`src/physics/vehicle.ts`）。
+- 刹车前翻：实验复现“58km/h 按刹车键 → 0.7s 内俯仰 68° 前翻”。根因是急刹（约 2.4g）在轮地接触点产生强烈点头力矩。修复：`BRAKE_FORCE` 170 → 70、`angularDamping` 0.3 → 0.7、`dampingCompression` 6.5 → 9.5。
+- 复测：58km/h 急刹俯仰峰值 10.9°，约 2.8s 平稳刹停；松油（发动机制动）与急刹都不再前翻。
+- 回归防护：`pnpm smoke` 新增“急刹不翻（up.y > 0.6）”断言（simple/complex 均覆盖）。
+
 ## 后续待讨论
 - M3 范围：环境装饰（树/石头）、音效与光影、多文件 `.gltf+.bin` 导入、vitest/代码分割（见 `docs/roadmap.md`）。
 - 驾驶手感调优参数（发动机力、悬架、转向）集中在 `src/physics/vehicle.ts` 顶部常量，改手感先动那里。

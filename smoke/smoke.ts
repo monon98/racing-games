@@ -4,6 +4,7 @@ import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TRACK_VERSION } from '../src/config';
+import { updateLapProgress } from '../src/game/lapProgress';
 import { CarPhysics } from '../src/physics/vehicle';
 import { buildTrack, generateCenterlinePoints } from '../src/track/generator';
 import { exportTrackToBlob, extractTrackUserData, TRACK_ASSET_TYPE } from '../src/track/gltf';
@@ -115,24 +116,28 @@ async function main(): Promise<void> {
     }
     const coast = physics.getState().absoluteSpeed;
     check('car decelerates when coasting', coast < 2.5, `coast speed=${coast.toFixed(2)} m/s`);
-    // 高速防前翻回归：全油门 2s 再松油 4s，车身俯仰不得失控（曾因发动机制动点头触发前翻）
-    physics.reset(
+    // 高速防前翻回归：全油门 2s 再松油 4s，车身俯仰不得失控（曾因发动机制动点头触发前翻）。
+    // 用无护栏世界，避免直行测试撞上护栏造成“碰撞翻车”干扰本项断言。
+    const flipPhysics = new CarPhysics();
+    flipPhysics.addGround(built.physics.ground);
+    flipPhysics.reset(
       new CANNON.Vec3(start.x, start.y + 0.5, start.z),
       new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
     );
     for (let i = 0; i < 30; i++) {
-      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      flipPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
     }
     let minUp = 1;
     for (let i = 0; i < 120; i++) {
-      physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
-      minUp = Math.min(minUp, physics.getState().up.y);
+      flipPhysics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+      minUp = Math.min(minUp, flipPhysics.getState().up.y);
     }
     for (let i = 0; i < 240; i++) {
-      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
-      minUp = Math.min(minUp, physics.getState().up.y);
+      flipPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      minUp = Math.min(minUp, flipPhysics.getState().up.y);
     }
     check('no forward flip at speed', minUp > 0.5, `min up.y=${minUp.toFixed(3)}`);
+    flipPhysics.dispose();
     // 倒车回归：限制加速力与最高倒车速度
     physics.reset(
       new CANNON.Vec3(start.x, start.y + 0.5, start.z),
@@ -145,12 +150,52 @@ async function main(): Promise<void> {
       physics.update({ throttle: -1, brake: 0, steering: 0 }, 1 / 60);
     }
     const reverse1s = -physics.getState().forwardSpeed;
-    check('reverse acceleration limited', reverse1s < 4, `reverse speed after 1s=${reverse1s.toFixed(2)} m/s`);
+    check('reverse acceleration limited', reverse1s < 7, `reverse speed after 1s=${reverse1s.toFixed(2)} m/s`);
     for (let i = 0; i < 120; i++) {
       physics.update({ throttle: -1, brake: 0, steering: 0 }, 1 / 60);
     }
     const reverseTop = -physics.getState().forwardSpeed;
     check('reverse top speed limited', reverseTop < 8.5, `reverse top speed=${reverseTop.toFixed(2)} m/s`);
+    // 护栏防穿透回归：高速右转 2s，车不能穿出护栏外（曾因薄护栏+穿透导致弯道脱轨无碰撞）
+    physics.reset(
+      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    for (let i = 0; i < 30; i++) {
+      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    }
+    let maxLateral = 0;
+    for (let i = 0; i < 120; i++) {
+      physics.update({ throttle: 1, brake: 0, steering: -1 }, 1 / 60);
+      if (i % 6 === 0) {
+        const p = physics.getState().position;
+        let best = Infinity;
+        for (const pt of built.points) {
+          const d = (p.x - pt.x) * (p.x - pt.x) + (p.z - pt.z) * (p.z - pt.z);
+          if (d < best) best = d;
+        }
+        maxLateral = Math.max(maxLateral, Math.sqrt(best));
+      }
+    }
+    const barrierLine = built.roadWidth / 2 + 0.6;
+    check('barrier contains car in high-speed turn', maxLateral < barrierLine + 1.2, `max lateral=${maxLateral.toFixed(2)}m`);
+    // 急刹防前翻回归：加速到 ~58km/h 后按刹车键 3s，俯仰不得失控（曾因刹车点头前翻）
+    physics.reset(
+      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    for (let i = 0; i < 30; i++) {
+      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    }
+    let minUpBrake = 1;
+    for (let i = 0; i < 108; i++) {
+      physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+    }
+    for (let i = 0; i < 180; i++) {
+      physics.update({ throttle: 0, brake: 1, steering: 0 }, 1 / 60);
+      minUpBrake = Math.min(minUpBrake, physics.getState().up.y);
+    }
+    check('no forward flip when braking at speed', minUpBrake > 0.6, `min up.y=${minUpBrake.toFixed(3)}`);
     physics.dispose();
     const roadAttr = (built.group.getObjectByName('road') as import('three').Mesh)?.geometry.getAttribute('position');
     check('road mesh has positions', !!roadAttr && roadAttr.count === 1400);
@@ -187,6 +232,15 @@ async function main(): Promise<void> {
       Math.abs(ud.centerline[0].z - built.points[0].z) < 1e-4,
     JSON.stringify(ud.centerline?.[0]),
   );
+
+  console.log('--- lap progress ---');
+  const L = 1000;
+  const cross = updateLapProgress(10, 990, L, 800);
+  check('crossed line detected', cross.crossedLine && Math.abs(cross.completedDistance - 820) < 1e-6, JSON.stringify(cross));
+  const mid = updateLapProgress(400, 300, L, 500);
+  check('mid-lap no crossing', !mid.crossedLine && Math.abs(mid.completedDistance - 600) < 1e-6, JSON.stringify(mid));
+  const back = updateLapProgress(300, 400, L, 600);
+  check('backward no progress', !back.crossedLine && back.dS < 0 && Math.abs(back.completedDistance - 600) < 1e-6, JSON.stringify(back));
 
   console.log(failures === 0 ? '\nSMOKE PASS' : `\nSMOKE FAIL (${failures})`);
   process.exitCode = failures === 0 ? 0 : 1;

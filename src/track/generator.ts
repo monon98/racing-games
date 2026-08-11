@@ -186,7 +186,8 @@ function buildBarriers(
     const t = tangents[i];
     const right = new THREE.Vector3(t.z, 0, -t.x).normalize();
     const next = points[(i + BARRIER_STEP) % points.length];
-    const segLen = Math.max(0.4, p.distanceTo(next));
+    // 段长放大 1.4 倍让相邻护栏重叠，消除弯道外侧的楔形缝隙
+    const segLen = Math.max(0.4, p.distanceTo(next) * 1.4);
     const offset = halfWidth + BARRIER_THICKNESS / 2 + 0.08;
     const yaw = Math.atan2(t.x, t.z);
     const halfExtents = new CANNON.Vec3(BARRIER_THICKNESS / 2, barrierHeight / 2, segLen / 2);

@@ -18,16 +18,23 @@ export interface VehicleState {
 
 const MAX_STEER = 0.55;
 const ENGINE_FORCE = 3200;
-const REVERSE_FORCE_RATIO = 0.35;
+const REVERSE_FORCE_RATIO = 0.5;
 const REVERSE_MAX_SPEED = 8; // m/s ≈ 29 km/h
-const BRAKE_FORCE = 170;
+const BRAKE_FORCE = 70;
 const ENGINE_BRAKE = 60;
 
 /** cannon-es 四轮车辆（RaycastVehicle 悬架） */
 export class CarPhysics {
   readonly world: CANNON.World;
   readonly chassis: CANNON.Body;
+  /** 物理固定子步（1/60 经实测最稳定；120Hz 会导致松油俯仰失稳翻车） */
+  fixedTimeStep = 1 / 60;
+  maxSubSteps = 3;
+  /** 碰撞到护栏时的回调（参数为法向冲击速度 m/s） */
+  onBarrierCollide: ((impactSpeed: number) => void) | null = null;
   private readonly vehicle: CANNON.RaycastVehicle;
+  private readonly barrierIds = new Set<number>();
+  private readonly onCollide: (event: { body: CANNON.Body; contact: CANNON.ContactEquation }) => void;
   private steerCurrent = 0;
 
   constructor() {
@@ -43,7 +50,7 @@ export class CarPhysics {
       shape: chassisShape,
       // 线性阻尼模拟空气阻力/滚动阻力，避免松油门后滑行过长
       linearDamping: 0.25,
-      angularDamping: 0.3,
+      angularDamping: 0.7,
     });
 
     // y-up 坐标系：right=X(0)、forward=Z(2)、up=Y(1)。
@@ -64,7 +71,7 @@ export class CarPhysics {
       maxSuspensionTravel: 0.25,
       frictionSlip: 2.1,
       dampingRelaxation: 4.0,
-      dampingCompression: 6.5,
+      dampingCompression: 9.5,
       maxSuspensionForce: 200000,
       rollInfluence: 0.08,
       axleLocal: new CANNON.Vec3(-1, 0, 0),
@@ -90,10 +97,23 @@ export class CarPhysics {
     }
     this.vehicle.addToWorld(this.world);
     this.world.addBody(this.chassis);
+
+    this.onCollide = (event) => {
+      if (!this.barrierIds.has(event.body.id)) return;
+      const impact = Math.abs(event.contact?.getImpactVelocityAlongNormal?.() ?? 0);
+      if (impact > 0) {
+        this.onBarrierCollide?.(impact);
+      }
+    };
+    this.chassis.addEventListener('collide', this.onCollide);
   }
 
   addGround(body: CANNON.Body): void {
     this.world.addBody(body);
+  }
+
+  markBarrier(body: CANNON.Body): void {
+    this.barrierIds.add(body.id);
   }
 
   update(input: VehicleInput, dt: number): void {
@@ -127,7 +147,7 @@ export class CarPhysics {
     this.vehicle.setBrake(brake, 2);
     this.vehicle.setBrake(brake, 3);
 
-    this.world.step(1 / 60, dt, 3);
+    this.world.step(this.fixedTimeStep, dt, this.maxSubSteps);
   }
 
   getState(): VehicleState {
@@ -162,6 +182,7 @@ export class CarPhysics {
   }
 
   dispose(): void {
+    this.chassis.removeEventListener('collide', this.onCollide);
     this.vehicle.removeFromWorld(this.world);
     this.world.removeBody(this.chassis);
   }

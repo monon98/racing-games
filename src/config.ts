@@ -14,7 +14,7 @@ export const ROAD_WIDTH_MULTIPLIER = 5.0;
 /** 护栏高度 = 车高 × 该系数（需求：车高的一半） */
 export const BARRIER_HEIGHT_FACTOR = 0.5;
 
-export const BARRIER_THICKNESS = 0.35;
+export const BARRIER_THICKNESS = 0.55;
 
 /** 每次重生固定时间惩罚（ms） */
 export const TIME_PENALTY_MS = 3000;
@@ -29,10 +29,10 @@ export const FLIP_ANGLE_DEG = 70;
 export const FLIP_HOLD_MS = 1000;
 
 /** 脱轨判定：超出路面半宽后的额外余量（m） */
-export const OFFTRACK_MARGIN = 0.8;
+export const OFFTRACK_MARGIN = 0.5;
 
 /** 脱轨持续判定时间（ms） */
-export const OFFTRACK_HOLD_MS = 600;
+export const OFFTRACK_HOLD_MS = 400;
 
 export const LEADERBOARD_SIZE = 10;
 

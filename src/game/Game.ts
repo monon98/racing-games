@@ -14,6 +14,7 @@ import { addLeaderboardEntry } from '../storage/db';
 import type { BuiltTrack } from '../track/generator';
 import { createHUD, type HudRefs } from '../ui/hud';
 import { drawMinimap } from '../ui/minimap';
+import { updateLapProgress } from './lapProgress';
 
 export interface GameOptions {
   playerName: string;
@@ -45,6 +46,8 @@ export class Game {
   private completedDistance = 0;
   private offTrackTimer = 0;
   private flipTimer = 0;
+  private shake = 0;
+  private readonly flashEl: HTMLDivElement;
 
   private readonly onKeyDown: (e: KeyboardEvent) => void;
   private readonly onKeyUp: (e: KeyboardEvent) => void;
@@ -93,7 +96,19 @@ export class Game {
     this.physics.addGround(track.physics.ground);
     for (const b of track.physics.barriers) {
       this.physics.addGround(b);
+      this.physics.markBarrier(b);
     }
+    this.physics.onBarrierCollide = (impact) => {
+      if (impact < 6) return;
+      this.shake = Math.min(0.5, 0.12 + impact * 0.008);
+      this.flashEl.classList.remove('active');
+      void this.flashEl.offsetWidth; // 重启动画
+      this.flashEl.classList.add('active');
+    };
+
+    this.flashEl = document.createElement('div');
+    this.flashEl.className = 'collision-flash';
+    container.appendChild(this.flashEl);
 
     const start = track.points[0];
     const tangent = track.tangents[0].clone();
@@ -167,6 +182,7 @@ export class Game {
 
   private tick(): void {
     const dt = Math.min(0.05, this.clock.getDelta());
+    this.shake = Math.max(0, this.shake - dt * 1.2);
     let state: ReturnType<CarPhysics['getState']>;
 
     if (!this.paused && !this.finished) {
@@ -289,14 +305,11 @@ export class Game {
       return;
     }
 
-    // 进度与冲线
-    let dS = s - this.lastS;
-    if (dS < -this.track.totalLength / 2) dS += this.track.totalLength;
-    if (dS > this.track.totalLength / 2) dS -= this.track.totalLength;
-    if (dS > 0) this.completedDistance += dS;
+    // 进度与冲线（判断必须基于上一帧的 lastS）
+    const progress = updateLapProgress(s, this.lastS, this.track.totalLength, this.completedDistance);
+    this.completedDistance = progress.completedDistance;
     this.lastS = s;
-
-    if (this.lastS > this.track.totalLength * 0.85 && s < this.track.totalLength * 0.15 && this.completedDistance > this.track.totalLength * 0.7) {
+    if (progress.crossedLine && this.completedDistance > this.track.totalLength * 0.7) {
       this.finish();
     }
   }
@@ -324,6 +337,11 @@ export class Game {
     const forward = new THREE.Vector3(state.forward.x, state.forward.y, state.forward.z);
     // 相机略低，让前轮在视野中可见
     const desired = pos.clone().sub(forward.clone().multiplyScalar(8.5)).add(new THREE.Vector3(0, 3.15, 0));
+    if (this.shake > 0) {
+      desired.x += (Math.random() - 0.5) * this.shake;
+      desired.y += (Math.random() - 0.5) * this.shake;
+      desired.z += (Math.random() - 0.5) * this.shake;
+    }
     this.camera.position.lerp(desired, Math.min(1, 5 * dt));
     this.camera.lookAt(pos.clone().add(forward.clone().multiplyScalar(5)));
   }
