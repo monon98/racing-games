@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+Thumbs.db
+logs/
+*.log
+.tmp-smoke/
+smoke/out-smoke.glb

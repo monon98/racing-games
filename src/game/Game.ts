@@ -1,0 +1,334 @@
+import * as CANNON from 'cannon-es';
+import * as THREE from 'three';
+import { buildCar, type CarVisual } from '../car/createCar';
+import {
+  DISTANCE_PENALTY_SEC_PER_M,
+  FLIP_ANGLE_DEG,
+  FLIP_HOLD_MS,
+  OFFTRACK_HOLD_MS,
+  OFFTRACK_MARGIN,
+  TIME_PENALTY_MS,
+} from '../config';
+import { CarPhysics, type VehicleInput } from '../physics/vehicle';
+import { addLeaderboardEntry } from '../storage/db';
+import type { BuiltTrack } from '../track/generator';
+import { createHUD, type HudRefs } from '../ui/hud';
+import { drawMinimap } from '../ui/minimap';
+
+export interface GameOptions {
+  playerName: string;
+  carColor: string;
+  onBack: () => void;
+  onRestart: () => void;
+}
+
+export class Game {
+  private readonly container: HTMLElement;
+  private readonly renderer: THREE.WebGLRenderer;
+  private readonly scene = new THREE.Scene();
+  private readonly camera: THREE.PerspectiveCamera;
+  private readonly clock = new THREE.Clock();
+  private readonly track: BuiltTrack;
+  private readonly car: CarVisual;
+  private readonly physics: CarPhysics;
+  private readonly hud: HudRefs;
+  private readonly opts: GameOptions;
+
+  private readonly keys = new Set<string>();
+  private paused = false;
+  private finished = false;
+  private readonly startTime = performance.now();
+  private timePenaltyMs = 0;
+  private distancePenaltyM = 0;
+  private flips = 0;
+  private lastS = 0;
+  private completedDistance = 0;
+  private offTrackTimer = 0;
+  private flipTimer = 0;
+
+  private readonly onKeyDown: (e: KeyboardEvent) => void;
+  private readonly onKeyUp: (e: KeyboardEvent) => void;
+  private readonly onResize: () => void;
+
+  constructor(container: HTMLElement, track: BuiltTrack, opts: GameOptions) {
+    this.container = container;
+    this.track = track;
+    this.opts = opts;
+
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(this.renderer.domElement);
+    this.renderer.domElement.className = 'game-canvas';
+
+    this.scene.background = new THREE.Color(0x87bceb);
+    this.scene.fog = new THREE.Fog(0x87bceb, 260, 1100);
+
+    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
+    this.camera.position.set(0, 6, 20);
+    this.camera.lookAt(0, 0, 0);
+
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6d7f66, 1.05));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+    sun.position.set(120, 180, 80);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -160;
+    sun.shadow.camera.right = 160;
+    sun.shadow.camera.top = 160;
+    sun.shadow.camera.bottom = -160;
+    sun.shadow.camera.far = 600;
+    this.scene.add(sun);
+
+    this.scene.add(track.group);
+    this.car = buildCar(opts.carColor);
+    this.scene.add(this.car.group);
+
+    this.physics = new CarPhysics();
+    this.physics.addGround(track.physics.ground);
+    for (const b of track.physics.barriers) {
+      this.physics.addGround(b);
+    }
+
+    const start = track.points[0];
+    const tangent = track.tangents[0].clone();
+    tangent.y = 0;
+    tangent.normalize();
+    const startQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), tangent);
+    this.physics.reset(
+      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    this.car.group.position.set(start.x, start.y + 0.5, start.z);
+    this.car.group.quaternion.copy(startQuat);
+    this.camera.position.copy(start.clone().sub(tangent.clone().multiplyScalar(9)).add(new THREE.Vector3(0, 4.2, 0)));
+    this.camera.lookAt(start.clone().add(tangent.clone().multiplyScalar(5)));
+
+    this.hud = createHUD(container);
+    this.hud.onBack(() => opts.onBack());
+    this.hud.onRestart(() => opts.onRestart());
+
+    this.onKeyDown = (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (!this.finished) {
+          this.paused = !this.paused;
+          this.hud.showPause(this.paused);
+        }
+        return;
+      }
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+        e.preventDefault();
+      }
+      this.keys.add(e.code);
+    };
+    this.onKeyUp = (e) => {
+      this.keys.delete(e.code);
+    };
+    this.onResize = () => this.resize();
+
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('resize', this.onResize);
+    this.resize();
+
+    this.renderer.setAnimationLoop(() => this.tick());
+  }
+
+  private resize(): void {
+    const w = this.container.clientWidth || window.innerWidth;
+    const h = this.container.clientHeight || window.innerHeight;
+    this.renderer.setSize(w, h);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+
+  private computeInput(state: ReturnType<CarPhysics['getState']>): VehicleInput {
+    const forward = this.keys.has('KeyW') || this.keys.has('ArrowUp');
+    const back = this.keys.has('KeyS') || this.keys.has('ArrowDown');
+    const left = this.keys.has('KeyA') || this.keys.has('ArrowLeft');
+    const right = this.keys.has('KeyD') || this.keys.has('ArrowRight');
+    let throttle = 0;
+    let brake = 0;
+    if (forward) throttle = 1;
+    else if (back) {
+      if (state.forwardSpeed > 1) brake = 1;
+      else throttle = -0.55;
+    }
+    const steering = (right ? 1 : 0) - (left ? 1 : 0);
+    return { throttle, brake, steering };
+  }
+
+  private tick(): void {
+    const dt = Math.min(0.05, this.clock.getDelta());
+    let state: ReturnType<CarPhysics['getState']>;
+
+    if (!this.paused && !this.finished) {
+      const input = this.computeInput(this.physics.getState());
+      this.physics.update(input, dt);
+      state = this.physics.getState();
+      this.syncVisual(state);
+      this.updateRules(state, dt);
+    } else {
+      state = this.physics.getState();
+    }
+
+    this.updateCamera(dt, state);
+    this.hud.update({
+      speedKmh: state.absoluteSpeed * 3.6,
+      elapsedMs: performance.now() - this.startTime,
+      timePenaltyMs: this.timePenaltyMs,
+      distancePenaltyM: this.distancePenaltyM,
+    });
+    drawMinimap(
+      this.hud.minimap,
+      this.track.points,
+      this.track.roadWidth,
+      new THREE.Vector3(state.position.x, state.position.y, state.position.z),
+      Math.atan2(state.forward.x, state.forward.z),
+    );
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  private syncVisual(state: ReturnType<CarPhysics['getState']>): void {
+    const p = state.position;
+    const q = state.quaternion;
+    this.car.group.position.set(p.x, p.y, p.z);
+    this.car.group.quaternion.set(q.x, q.y, q.z, q.w);
+    for (let i = 0; i < this.car.wheels.length; i++) {
+      const t = this.physics.getWheelTransform(i);
+      this.car.wheels[i].position.set(t.position.x, t.position.y, t.position.z);
+      this.car.wheels[i].quaternion.set(t.quaternion.x, t.quaternion.y, t.quaternion.z, t.quaternion.w);
+    }
+  }
+
+  private nearestIndex(pos: { x: number; y: number; z: number }): number {
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < this.track.points.length; i++) {
+      const p = this.track.points[i];
+      const dx = pos.x - p.x;
+      const dy = pos.y - p.y;
+      const dz = pos.z - p.z;
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  private respawn(reason: 'flip' | 'offtrack'): void {
+    if (reason === 'flip') this.flips += 1;
+    const state = this.physics.getState();
+    const idx = this.nearestIndex(state.position);
+    const respawnS = this.track.lengths[idx];
+    if (respawnS < this.lastS) {
+      this.distancePenaltyM += this.lastS - respawnS;
+    }
+    this.timePenaltyMs += TIME_PENALTY_MS;
+
+    const p = this.track.points[idx];
+    const tangent = this.track.tangents[idx].clone();
+    tangent.y = 0;
+    tangent.normalize();
+    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), tangent);
+    this.physics.reset(
+      new CANNON.Vec3(p.x, p.y + 0.5, p.z),
+      new CANNON.Quaternion(quat.x, quat.y, quat.z, quat.w),
+    );
+    this.lastS = respawnS;
+    this.offTrackTimer = 0;
+    this.flipTimer = 0;
+  }
+
+  private updateRules(state: ReturnType<CarPhysics['getState']>, dt: number): void {
+    const dtMs = dt * 1000;
+    const pos = state.position;
+    const idx = this.nearestIndex(pos);
+    const p = this.track.points[idx];
+    const s = this.track.lengths[idx];
+    const halfWidth = this.track.roadWidth / 2;
+
+    // 脱轨判定（水平距离）
+    const dx = pos.x - p.x;
+    const dz = pos.z - p.z;
+    const horizontalDist = Math.hypot(dx, dz);
+    if (horizontalDist > halfWidth + OFFTRACK_MARGIN) {
+      this.offTrackTimer += dtMs;
+    } else {
+      this.offTrackTimer = 0;
+    }
+    if (this.offTrackTimer > OFFTRACK_HOLD_MS) {
+      this.respawn('offtrack');
+      return;
+    }
+
+    // 翻车判定（车身上向量偏离竖直）
+    const angleDeg = (Math.acos(Math.min(1, Math.max(-1, state.up.y))) * 180) / Math.PI;
+    if (angleDeg > FLIP_ANGLE_DEG) {
+      this.flipTimer += dtMs;
+    } else {
+      this.flipTimer = 0;
+    }
+    if (this.flipTimer > FLIP_HOLD_MS) {
+      this.respawn('flip');
+      return;
+    }
+
+    // 坠落兜底
+    if (pos.y < -8) {
+      this.respawn('offtrack');
+      return;
+    }
+
+    // 进度与冲线
+    let dS = s - this.lastS;
+    if (dS < -this.track.totalLength / 2) dS += this.track.totalLength;
+    if (dS > this.track.totalLength / 2) dS -= this.track.totalLength;
+    if (dS > 0) this.completedDistance += dS;
+    this.lastS = s;
+
+    if (this.lastS > this.track.totalLength * 0.85 && s < this.track.totalLength * 0.15 && this.completedDistance > this.track.totalLength * 0.7) {
+      this.finish();
+    }
+  }
+
+  private finish(): void {
+    if (this.finished) return;
+    this.finished = true;
+    const elapsed = performance.now() - this.startTime;
+    const lapTimeMs =
+      elapsed + this.timePenaltyMs + this.distancePenaltyM * DISTANCE_PENALTY_SEC_PER_M * 1000;
+    void addLeaderboardEntry({
+      trackId: this.track.meta.id,
+      playerName: this.opts.playerName,
+      lapTimeMs,
+      timePenaltyMs: this.timePenaltyMs,
+      distancePenaltyM: this.distancePenaltyM,
+      flips: this.flips,
+      date: Date.now(),
+    });
+    this.hud.showResult({ lapTimeMs, timePenaltyMs: this.timePenaltyMs, distancePenaltyM: this.distancePenaltyM });
+  }
+
+  private updateCamera(dt: number, state: ReturnType<CarPhysics['getState']>): void {
+    const pos = new THREE.Vector3(state.position.x, state.position.y, state.position.z);
+    const forward = new THREE.Vector3(state.forward.x, state.forward.y, state.forward.z);
+    const desired = pos.clone().sub(forward.clone().multiplyScalar(8.5)).add(new THREE.Vector3(0, 3.6, 0));
+    this.camera.position.lerp(desired, Math.min(1, 5 * dt));
+    this.camera.lookAt(pos.clone().add(forward.clone().multiplyScalar(5)));
+  }
+
+  dispose(): void {
+    this.renderer.setAnimationLoop(null);
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('resize', this.onResize);
+    this.physics.dispose();
+    this.renderer.dispose();
+    this.container.innerHTML = '';
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Racing Game Dev"
+  short_description: "Guidelines for the three.js racing game project"
+  default_prompt: "Use $racing-game-dev to implement the next racing game feature per project conventions."

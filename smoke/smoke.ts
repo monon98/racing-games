@@ -1,0 +1,98 @@
+/* 一次性 Node 冒烟测试：验证赛道生成、物理构建、GLB 往返（不依赖浏览器） */
+import * as fs from 'node:fs';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { TRACK_VERSION } from '../src/config';
+import { buildTrack, generateCenterlinePoints } from '../src/track/generator';
+import { exportTrackToBlob, extractTrackUserData, TRACK_ASSET_TYPE } from '../src/track/gltf';
+import type { TrackMeta } from '../src/types';
+
+let failures = 0;
+
+if (typeof (globalThis as { FileReader?: unknown }).FileReader === 'undefined') {
+  // GLTFExporter 二进制导出依赖 FileReader；Node 24 无全局实现，提供最小 polyfill
+  class SimpleFileReader {
+    result: ArrayBuffer | null = null;
+    onload: ((ev: { target: SimpleFileReader }) => void) | null = null;
+    onloadend: ((ev: { target: SimpleFileReader }) => void) | null = null;
+    onerror: ((ev: { target: SimpleFileReader; error: unknown }) => void) | null = null;
+    readAsArrayBuffer(blob: Blob): void {
+      blob
+        .arrayBuffer()
+        .then((buf) => {
+          this.result = buf;
+          this.onload?.({ target: this });
+          this.onloadend?.({ target: this });
+        })
+        .catch((error: unknown) => {
+          this.onerror?.({ target: this, error });
+        });
+    }
+  }
+  (globalThis as { FileReader?: unknown }).FileReader = SimpleFileReader;
+}
+
+function check(name: string, cond: boolean, detail = ''): void {
+  if (cond) {
+    console.log(`  [ok] ${name}`);
+  } else {
+    failures += 1;
+    console.error(`  [FAIL] ${name} ${detail}`);
+  }
+}
+
+function makeMeta(mode: 'simple' | 'complex', seed: number): TrackMeta {
+  return { id: `smoke-${mode}-${seed}`, mode, seed, createdAt: Date.now(), version: TRACK_VERSION };
+}
+
+async function main(): Promise<void> {
+  for (const mode of ['simple', 'complex'] as const) {
+    console.log(`--- ${mode} track ---`);
+    const meta = makeMeta(mode, 42);
+    const points = generateCenterlinePoints(meta);
+    check('centerline 700 points', points.length === 700);
+    const built = buildTrack(meta, points);
+    check('roadWidth = 7.0', Math.abs(built.roadWidth - 7.0) < 1e-6, String(built.roadWidth));
+    check('barrierHeight = 0.7', Math.abs(built.barrierHeight - 0.7) < 1e-6, String(built.barrierHeight));
+    check('totalLength in [250, 1200]', built.totalLength > 250 && built.totalLength < 1200, String(built.totalLength));
+    check('has barriers', built.physics.barriers.length > 20, String(built.physics.barriers.length));
+    const roadAttr = (built.group.getObjectByName('road') as import('three').Mesh)?.geometry.getAttribute('position');
+    check('road mesh has positions', !!roadAttr && roadAttr.count === 1400);
+    if (mode === 'complex') {
+      const ys = built.points.map((p) => p.y);
+      check('complex has elevation', Math.max(...ys) - Math.min(...ys) > 1, `range=${(Math.max(...ys) - Math.min(...ys)).toFixed(2)}`);
+    }
+  }
+
+  console.log('--- GLB roundtrip ---');
+  const meta = makeMeta('simple', 7);
+  const built = buildTrack(meta, generateCenterlinePoints(meta));
+  const blob = await exportTrackToBlob(built);
+  const buf = Buffer.from(await blob.arrayBuffer());
+  fs.writeFileSync(new URL('./out-smoke.glb', import.meta.url), buf);
+  check('GLB size > 100KB', buf.length > 100_000, `${buf.length} bytes`);
+
+  const loader = new GLTFLoader();
+  const gltf = await new Promise<Awaited<ReturnType<typeof loader.parseAsync>>>((resolve, reject) => {
+    loader.parse(
+      buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+      '',
+      (g) => resolve(g),
+      (e) => reject(e),
+    );
+  });
+  const ud = extractTrackUserData(gltf.scene);
+  check('userData.type preserved', ud.type === TRACK_ASSET_TYPE, String(ud.type));
+  check('centerline preserved (700)', Array.isArray(ud.centerline) && ud.centerline.length === 700, String(ud.centerline?.length));
+  check(
+    'first point matches',
+    !!ud.centerline &&
+      Math.abs(ud.centerline[0].x - built.points[0].x) < 1e-4 &&
+      Math.abs(ud.centerline[0].z - built.points[0].z) < 1e-4,
+    JSON.stringify(ud.centerline?.[0]),
+  );
+
+  console.log(failures === 0 ? '\nSMOKE PASS' : `\nSMOKE FAIL (${failures})`);
+  process.exitCode = failures === 0 ? 0 : 1;
+}
+
+void main();

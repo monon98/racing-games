@@ -1,0 +1,24 @@
+{
+  "name": "racing-games",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.17.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "smoke": "vite build --ssr smoke/smoke.ts --outDir .tmp-smoke --emptyOutDir --logLevel warn && node .tmp-smoke/smoke.js"
+  },
+  "dependencies": {
+    "cannon-es": "^0.20.0",
+    "idb": "^8.0.3",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1"
+  }
+}
