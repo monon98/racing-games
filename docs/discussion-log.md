@@ -108,6 +108,11 @@
 - 转向最大角 0.65 → **0.8 rad（约 46°）**（`MAX_STEER`），打方向幅度更大。
 - 首页“赛道模式”从“开始游戏”卡片移到“当前赛道”卡片，在**点击重新生成时生效**；选项去掉括号提示（仅“简单/复杂”）。
 - 首页卡片半透明（`rgb(27 34 44 / 0.72)` + 背景模糊），3D 背景预览更清晰可见。
+
+## 2026-08-12 GitHub Pages 部署配置
+- `.github/workflows/deploy.yml`：push 到 main 或手动触发 → pnpm 安装/类型检查/构建 → `actions/configure-pages` + `upload-pages-artifact` + `deploy-pages` 发布。
+- `vite.config.ts`：base 动态化——GitHub Actions 下按仓库名生成 `/racing-games/` 子路径，本地保持 `./`（hash 路由无需 404 处理）。
+- `public/.nojekyll`：防止 GitHub Pages 用 Jekyll 处理站点。
 - M3 范围：环境装饰（树/石头）、音效与光影、多文件 `.gltf+.bin` 导入、vitest/代码分割（见 `docs/roadmap.md`）。
 - 驾驶手感调优参数（发动机力、悬架、转向）集中在 `src/physics/vehicle.ts` 顶部常量，改手感先动那里。
 - 浏览器人工验收清单（持久化、清榜、GLB 往返、重生惩罚、暂停/返回、小地图）见 `docs/progress.md`。
