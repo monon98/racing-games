@@ -28,6 +28,7 @@ export class Game {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
+  private readonly sun: THREE.DirectionalLight;
   private readonly clock = new THREE.Clock();
   private readonly track: BuiltTrack;
   private readonly car: CarVisual;
@@ -61,7 +62,8 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCF 比 PCFSoft 边缘更稳定，减少阴影闪烁
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.className = 'game-canvas';
 
@@ -73,16 +75,18 @@ export class Game {
     this.camera.lookAt(0, 0, 0);
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6d7f66, 1.05));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-    sun.position.set(120, 180, 80);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -160;
-    sun.shadow.camera.right = 160;
-    sun.shadow.camera.top = 160;
-    sun.shadow.camera.bottom = -160;
-    sun.shadow.camera.far = 600;
-    this.scene.add(sun);
+    this.sun = new THREE.DirectionalLight(0xffffff, 1.6);
+    this.sun.position.set(120, 180, 80);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    // 阴影相机跟随车辆，避免车辆在固定阴影图上跨纹素导致阴影抖动
+    this.sun.shadow.camera.left = -90;
+    this.sun.shadow.camera.right = 90;
+    this.sun.shadow.camera.top = 90;
+    this.sun.shadow.camera.bottom = -90;
+    this.sun.shadow.camera.far = 500;
+    this.scene.add(this.sun);
+    this.scene.add(this.sun.target);
 
     this.scene.add(track.group);
     this.car = buildCar(opts.carColor);
@@ -194,6 +198,10 @@ export class Game {
     } else {
       state = this.physics.getState();
     }
+
+    // 平行光与阴影相机跟随车辆（保持偏移），大幅减轻阴影抖动
+    this.sun.position.set(state.position.x + 120, state.position.y + 180, state.position.z + 80);
+    this.sun.target.position.set(state.position.x, state.position.y, state.position.z);
 
     this.updateCamera(dt, state);
     this.hud.update({

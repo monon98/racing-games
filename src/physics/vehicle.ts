@@ -45,7 +45,6 @@ export class CarPhysics {
   private readonly barrierIds = new Set<number>();
   private readonly onCollide: (event: { body: CANNON.Body; contact: CANNON.ContactEquation }) => void;
   private steerCurrent = 0;
-  private frontAirborneTime = 0;
 
   constructor() {
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.81, 0) });
@@ -60,7 +59,7 @@ export class CarPhysics {
       // 线性阻尼模拟空气阻力/滚动阻力，避免松油门后滑行过长
       // 线性阻尼 0.12：极速可达 200+km/h，松油仍能缓慢减速
       linearDamping: 0.12,
-      angularDamping: 0.8,
+      angularDamping: 1.0,
     });
     // 重心下移 0.10m（碰撞盒下偏），车身也更贴近路面，降低抬头力矩
     this.chassis.addShape(chassisShape, new CANNON.Vec3(0, -0.1, 0));
@@ -164,16 +163,22 @@ export class CarPhysics {
         const taper = Math.max(0, 1 - (fwdSpeed - FORWARD_MAX_SPEED * 0.85) / (FORWARD_MAX_SPEED * 0.13));
         force *= taper;
       }
-      // 防抬头后翻：前轮持续离地（wheelie）150ms 后才把动力降到 0.35 倍（允许短促抬头，不牺牲起步加速）
-      const frontInContact =
-        this.vehicle.wheelInfos[0].isInContact && this.vehicle.wheelInfos[1].isInContact;
-      if (frontInContact) {
-        this.frontAirborneTime = 0;
-      } else {
-        this.frontAirborneTime += dt;
+      // 防抬头后翻：按俯仰角平滑削减动力（允许短促抬头起步，随抬头逐渐限功）
+      const up = new CANNON.Vec3(0, 1, 0);
+      this.chassis.quaternion.vmult(up, up);
+      const pitch = Math.acos(Math.max(-1, Math.min(1, up.y)));
+      if (pitch > 0.1) {
+        force *= Math.max(0.05, 1 - (pitch - 0.1) * 2.2);
       }
-      if (this.frontAirborneTime > 0.15) {
-        force *= 0.35;
+      if (pitch > 0.12) {
+        // 俯仰角速度阻尼：衰减绕侧轴的角速度，直接阻止抬头翻车
+        const right = new CANNON.Vec3(1, 0, 0);
+        this.chassis.quaternion.vmult(right, right);
+        const pitchAngVel = this.chassis.angularVelocity.dot(right);
+        const damp = pitchAngVel * 0.6;
+        this.chassis.angularVelocity.x -= right.x * damp;
+        this.chassis.angularVelocity.y -= right.y * damp;
+        this.chassis.angularVelocity.z -= right.z * damp;
       }
     } else if (input.throttle < 0) {
       // 倒车限制：更小的加速力 + 最高倒车速度

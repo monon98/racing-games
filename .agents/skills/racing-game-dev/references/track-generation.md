@@ -2,10 +2,11 @@
 
 入口：`src/track/generator.ts`，类型见 `src/types.ts`。
 
-## 中心线
-- `generateCenterlinePoints(meta)`：由种子经 `mulberry32` 生成 10 个控制点（半径由 3 个正弦谐波叠加，约 60~130m），CatmullRomCurve3 闭环，采样 700 点。
-- 复杂模式：每个采样点 y = `makeElevation(seed)(x, z)`（3 层分形值噪声，幅度 ±4.2m，见 `src/track/noise.ts`）。
-- 采样点数组即 `BuiltTrack.points`；切线 `tangents[i] = normalize(p[i+1] - p[i-1])`。
+## 中心线（赛道生成规则，2026-08-12 版）
+- `generateCenterlinePoints(meta)`：
+  - 简单模式 = `generatePolygonLoop`：凸多边形（5~7 边）+ 圆角（fillet），保证至少一条 ≥100m 长直线，弯道为光滑圆弧且保持趋势；长度 1200~2200m 随机。
+  - 复杂模式 = `generateComplexTrack`：布局随机（lemniscate 八字 / 多边形圆角）；高度由 `assignElevation` 生成——曲率 >0.006 的弯道区域分配平台高度（0/3/6），直线段用短坡连接平台（坡长 ≥18m 且随高差加长、坡度 ≤0.25、无断崖，可连续）；弯道本身不倾斜；平台区域少于 2 个时按最高曲率点兜底强制。
+- 采样间距约 1.2m；`BuiltTrack.points` 数量随长度（900~2200 点）。
 
 ## 路面与护栏
 - 路面横向右向量 = `(t.z, 0, -t.x)` 归一化；两侧偏移 = 局部半宽 `halfWidths[i]`（直道 = 基础宽/2，弯道按曲率最多加宽 40%，见 `computeHalfWidths`，平滑处理）。
