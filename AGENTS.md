@@ -24,6 +24,7 @@
 
 ## 规则
 - 每个里程碑完成或状态变化后，更新 `docs/progress.md`（已完成/未完成清单）。
+- 对话中确认的决策、发现的问题与修改方式，追加记录到 `docs/discussion-log.md`。
 - 需求变化先更新 `docs/requirements.md`，再改代码。
 - 提交/交付前必须通过 `pnpm typecheck` 与 `pnpm build`。
 - 涉及赛道格式、物理规则或存储结构的变更，同步更新 `.agents/skills/racing-game-dev/`。

@@ -256,6 +256,8 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
   let ground: CANNON.Body;
   if (meta.mode === 'simple') {
     ground = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
+    // cannon-es Plane 默认法线为 (0,0,1)；绕 X 轴旋转 -90° 使其朝上，否则车会直接坠落
+    ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
   } else {
     const trimesh = new CANNON.Trimesh(positions, indices);
     ground = new CANNON.Body({ mass: 0, shape: trimesh });
@@ -264,6 +266,7 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
       shape: new CANNON.Plane(),
       position: new CANNON.Vec3(0, -30, 0),
     });
+    catcher.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
     barrierBodies.push(catcher);
   }
 

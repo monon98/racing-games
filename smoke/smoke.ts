@@ -1,7 +1,10 @@
 /* 一次性 Node 冒烟测试：验证赛道生成、物理构建、GLB 往返（不依赖浏览器） */
 import * as fs from 'node:fs';
+import * as CANNON from 'cannon-es';
+import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TRACK_VERSION } from '../src/config';
+import { CarPhysics } from '../src/physics/vehicle';
 import { buildTrack, generateCenterlinePoints } from '../src/track/generator';
 import { exportTrackToBlob, extractTrackUserData, TRACK_ASSET_TYPE } from '../src/track/gltf';
 import type { TrackMeta } from '../src/types';
@@ -55,6 +58,29 @@ async function main(): Promise<void> {
     check('barrierHeight = 0.7', Math.abs(built.barrierHeight - 0.7) < 1e-6, String(built.barrierHeight));
     check('totalLength in [250, 1200]', built.totalLength > 250 && built.totalLength < 1200, String(built.totalLength));
     check('has barriers', built.physics.barriers.length > 20, String(built.physics.barriers.length));
+    // 物理坠落回归：车应在 2 秒内停在路面上而不是掉下去
+    const physics = new CarPhysics();
+    physics.addGround(built.physics.ground);
+    for (const b of built.physics.barriers) physics.addGround(b);
+    const start = built.points[0];
+    const tangent = built.tangents[0].clone();
+    tangent.y = 0;
+    tangent.normalize();
+    const startQuat = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      tangent,
+    );
+    physics.reset(
+      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    const steps = 120;
+    for (let i = 0; i < steps; i++) {
+      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    }
+    const settled = physics.getState().position.y;
+    check('car does not fall through ground', settled > start.y - 1, `settled y=${settled.toFixed(2)}, ground y=${start.y.toFixed(2)}`);
+    physics.dispose();
     const roadAttr = (built.group.getObjectByName('road') as import('three').Mesh)?.geometry.getAttribute('position');
     check('road mesh has positions', !!roadAttr && roadAttr.count === 1400);
     if (mode === 'complex') {

@@ -8,6 +8,10 @@
 - 控制：`throttle` 施加于后轮（±3200N），`brake` 施加四轮（≤170），转向最大 0.55rad、按 6/s 平滑。
 - 视觉同步：`getWheelTransform(i)` 返回含转向/自旋的轮子世界变换，直接赋给轮子 mesh。
 
+## 地面物理注意事项
+- cannon-es `Plane` 的默认局部法线是 `(0,0,1)`（竖直面），用作水平地面必须 `body.quaternion.setFromEuler(-Math.PI/2, 0, 0)`，否则车辆直接坠落（曾发生“开局即掉落”bug）。
+- 复杂模式地面用路面顶点构建 `CANNON.Trimesh`（与视觉完全贴合），另加 y=-30 的水平 Plane 兜底。
+
 ## 检测与重生（src/config.ts 有全部阈值）
 - 翻车：车身上向量与竖直夹角 > 70° 持续 1s → `respawn('flip')`，`flips+1`（仅记录不展示）。
 - 脱轨：水平距离中心线 > 半宽 + 0.8m 持续 0.6s → `respawn('offtrack')`。

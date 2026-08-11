@@ -12,6 +12,8 @@
   - [x] docs 四件套（requirements / tech-stack / roadmap / progress）
 - [x] M1 最小可玩版（全部功能项，见 `docs/roadmap.md`）
 - [x] M2 复杂赛道（分形噪声起伏 + 路面 Trimesh 物理）
+- [x] 对话决策记录文档 `docs/discussion-log.md`（后续决策/问题/修改方式持续追加）
+- [x] Bug 修复：开局即掉落（Plane 默认法线为竖直面，已旋转为水平）；`pnpm smoke` 新增“车辆不下坠”回归断言
 - [x] 工程验证：`pnpm typecheck`、`pnpm build`、`pnpm smoke`（Node 冒烟：赛道生成/物理/GLB 往返）全部通过
 
 ## 未完成 / 待办
