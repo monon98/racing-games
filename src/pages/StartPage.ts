@@ -11,8 +11,8 @@ import { fmtTime } from '../utils/format';
 import { randomSeed } from '../utils/random';
 
 const MODE_LABEL: Record<TrackMode, string> = {
-  simple: '简单（平面）',
-  complex: '复杂（起伏）',
+  simple: '简单',
+  complex: '复杂',
 };
 
 export function mountStartPage(root: HTMLElement): () => void {
@@ -35,19 +35,19 @@ export function mountStartPage(root: HTMLElement): () => void {
             <span>汽车颜色</span>
             <input id="car-color" type="color" />
           </label>
-          <label class="field">
-            <span>赛道模式</span>
-            <select id="track-mode">
-              <option value="simple">简单（平面）</option>
-              <option value="complex">复杂（高低起伏）</option>
-            </select>
-          </label>
           <button id="btn-start" class="btn btn-primary">开始游戏</button>
         </section>
 
         <section class="panel">
           <h2>当前赛道</h2>
           <div id="track-info" class="track-info">加载中…</div>
+          <label class="field">
+            <span>赛道模式（点击重新生成时生效）</span>
+            <select id="track-mode">
+              <option value="simple">简单</option>
+              <option value="complex">复杂</option>
+            </select>
+          </label>
           <div class="track-actions">
             <button id="btn-regenerate" class="btn">重新生成赛道</button>
             <button id="btn-export" class="btn">导出赛道</button>

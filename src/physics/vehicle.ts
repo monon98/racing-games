@@ -18,7 +18,7 @@ export interface VehicleState {
   absoluteSpeed: number;
 }
 
-const MAX_STEER = 0.65;
+const MAX_STEER = 0.8;
 // 质量加重（抗飞起）；发动机力同步提高保持 0-100 约 1.5s（7500×2/750≈20 m/s²）；
 // 倒车约等于旧正向加速：7500 × 0.65 ≈ 4875N/轮
 const ENGINE_FORCE = 7500;

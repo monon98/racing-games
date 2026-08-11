@@ -95,7 +95,8 @@ select {
 }
 
 .panel {
-  background: var(--panel);
+  background: rgb(27 34 44 / 0.72);
+  backdrop-filter: blur(8px);
   border: 1px solid var(--panel-border);
   border-radius: 14px;
   padding: 22px;
