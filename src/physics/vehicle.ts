@@ -18,7 +18,10 @@ export interface VehicleState {
 
 const MAX_STEER = 0.55;
 const ENGINE_FORCE = 3200;
+const REVERSE_FORCE_RATIO = 0.35;
+const REVERSE_MAX_SPEED = 8; // m/s ≈ 29 km/h
 const BRAKE_FORCE = 170;
+const ENGINE_BRAKE = 60;
 
 /** cannon-es 四轮车辆（RaycastVehicle 悬架） */
 export class CarPhysics {
@@ -32,7 +35,8 @@ export class CarPhysics {
     this.world.broadphase = new CANNON.SAPBroadphase(this.world);
 
     const chassisShape = new CANNON.Box(
-      new CANNON.Vec3(CAR.width / 2 - 0.05, CAR.height * 0.32, CAR.length / 2 - 0.05),
+      // 底盘降低（重心低、离地高），避免刹车点头后底盘触地引发前翻
+      new CANNON.Vec3(CAR.width / 2 - 0.05, CAR.height * 0.26, CAR.length / 2 - 0.05),
     );
     this.chassis = new CANNON.Body({
       mass: 550,
@@ -54,12 +58,13 @@ export class CarPhysics {
     const wheelOptionsBase = {
       radius: CAR.wheelRadius,
       directionLocal: new CANNON.Vec3(0, -1, 0),
-      suspensionStiffness: 30,
-      suspensionRestLength: 0.32,
-      maxSuspensionTravel: 0.35,
+      // 悬架加硬、行程缩短，抑制刹车/加速时的俯仰振荡（防止高速前翻）
+      suspensionStiffness: 45,
+      suspensionRestLength: 0.38,
+      maxSuspensionTravel: 0.25,
       frictionSlip: 2.1,
-      dampingRelaxation: 2.4,
-      dampingCompression: 4.0,
+      dampingRelaxation: 4.0,
+      dampingCompression: 6.5,
       maxSuspensionForce: 200000,
       rollInfluence: 0.08,
       axleLocal: new CANNON.Vec3(-1, 0, 0),
@@ -71,7 +76,7 @@ export class CarPhysics {
     const zRear = -CAR.length * 0.37;
     // 轮距略宽于车身，前轮在追尾视角下可见
     const xOffset = CAR.width / 2 + 0.12;
-    const yOffset = -0.3;
+    const yOffset = -0.24;
     for (const [x, z] of [
       [-xOffset, zFront],
       [xOffset, zFront],
@@ -100,12 +105,22 @@ export class CarPhysics {
 
     // RaycastVehicle 在 right=X(0)/forward=Z(2)/up=Y(1) 配置下，
     // 正发动机力会沿 -Z 推（实测倒车），因此取反：正油门 = 向前(+Z)。
-    const force = -input.throttle * ENGINE_FORCE;
+    let force = -input.throttle * ENGINE_FORCE;
+    if (input.throttle < 0) {
+      // 倒车限制：更小的加速力 + 最高倒车速度
+      force = -input.throttle * ENGINE_FORCE * REVERSE_FORCE_RATIO;
+      const fwd = new CANNON.Vec3(0, 0, 1);
+      this.chassis.quaternion.vmult(fwd, fwd);
+      const forwardSpeed = this.chassis.velocity.dot(fwd);
+      if (forwardSpeed < -REVERSE_MAX_SPEED) {
+        force = 0;
+      }
+    }
     this.vehicle.applyEngineForce(force, 2);
     this.vehicle.applyEngineForce(force, 3);
 
     // 松油门且不踩刹车时施加“发动机制动”，避免无阻力滑行
-    const engineBrake = input.throttle === 0 && input.brake === 0 ? 90 : 0;
+    const engineBrake = input.throttle === 0 && input.brake === 0 ? ENGINE_BRAKE : 0;
     const brake = Math.max(input.brake * BRAKE_FORCE, engineBrake);
     this.vehicle.setBrake(brake, 0);
     this.vehicle.setBrake(brake, 1);

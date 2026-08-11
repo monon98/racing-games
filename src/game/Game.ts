@@ -160,7 +160,8 @@ export class Game {
       if (state.forwardSpeed > 1) brake = 1;
       else throttle = -0.55;
     }
-    const steering = (right ? 1 : 0) - (left ? 1 : 0);
+    // 用户反馈左右方向反了：左键 → +1（左转）
+    const steering = (left ? 1 : 0) - (right ? 1 : 0);
     return { throttle, brake, steering };
   }
 

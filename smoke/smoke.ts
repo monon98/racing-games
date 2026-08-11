@@ -99,7 +99,7 @@ async function main(): Promise<void> {
     const delta = new CANNON.Vec3(driveEnd.x - driveStart.x, 0, driveEnd.z - driveStart.z);
     const forwardProgress = delta.dot(forward);
     check('car drives forward on throttle', forwardProgress > 3, `forward progress=${forwardProgress.toFixed(2)}m`);
-    // 转向回归：油门 + 右转 1.5s，航向角应有明显变化（前轮不触地时转向无效）
+    // 转向回归：油门 + steering=1（左转键）1.5s，航向角应有明显变化（前轮不触地时转向无效）
     const h0 = Math.atan2(physics.getState().forward.x, physics.getState().forward.z);
     for (let i = 0; i < 90; i++) {
       physics.update({ throttle: 0.8, brake: 0, steering: 1 }, 1 / 60);
@@ -108,13 +108,49 @@ async function main(): Promise<void> {
     let dh = h1 - h0;
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
-    check('steering turns the car', dh > 0.02, `heading change=${dh.toFixed(3)}rad (steering=1 should turn right)`);
+    check('steering turns the car', dh > 0.02, `heading change=${dh.toFixed(3)}rad (steering=1 = left)`);
     // 滑行回归：松油门 4s 后速度应明显下降（阻尼 + 发动机制动）
     for (let i = 0; i < 240; i++) {
       physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
     }
     const coast = physics.getState().absoluteSpeed;
     check('car decelerates when coasting', coast < 2.5, `coast speed=${coast.toFixed(2)} m/s`);
+    // 高速防前翻回归：全油门 2s 再松油 4s，车身俯仰不得失控（曾因发动机制动点头触发前翻）
+    physics.reset(
+      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    for (let i = 0; i < 30; i++) {
+      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    }
+    let minUp = 1;
+    for (let i = 0; i < 120; i++) {
+      physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+      minUp = Math.min(minUp, physics.getState().up.y);
+    }
+    for (let i = 0; i < 240; i++) {
+      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      minUp = Math.min(minUp, physics.getState().up.y);
+    }
+    check('no forward flip at speed', minUp > 0.5, `min up.y=${minUp.toFixed(3)}`);
+    // 倒车回归：限制加速力与最高倒车速度
+    physics.reset(
+      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    for (let i = 0; i < 30; i++) {
+      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    }
+    for (let i = 0; i < 60; i++) {
+      physics.update({ throttle: -1, brake: 0, steering: 0 }, 1 / 60);
+    }
+    const reverse1s = -physics.getState().forwardSpeed;
+    check('reverse acceleration limited', reverse1s < 4, `reverse speed after 1s=${reverse1s.toFixed(2)} m/s`);
+    for (let i = 0; i < 120; i++) {
+      physics.update({ throttle: -1, brake: 0, steering: 0 }, 1 / 60);
+    }
+    const reverseTop = -physics.getState().forwardSpeed;
+    check('reverse top speed limited', reverseTop < 8.5, `reverse top speed=${reverseTop.toFixed(2)} m/s`);
     physics.dispose();
     const roadAttr = (built.group.getObjectByName('road') as import('three').Mesh)?.geometry.getAttribute('position');
     check('road mesh has positions', !!roadAttr && roadAttr.count === 1400);
