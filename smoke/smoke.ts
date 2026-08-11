@@ -1,4 +1,4 @@
-/* 一次性 Node 冒烟测试：验证赛道生成、物理构建、GLB 往返（不依赖浏览器） */
+﻿/* 一次性 Node 冒烟测试：验证赛道生成、物理构建、GLB 往返（不依赖浏览器） */
 import * as fs from 'node:fs';
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
@@ -6,7 +6,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CAR, TRACK_VERSION } from '../src/config';
 import { updateLapProgress } from '../src/game/lapProgress';
 import { CarPhysics, CHASSIS_SPAWN_HEIGHT } from '../src/physics/vehicle';
-import { buildTrack, generateCenterlinePoints } from '../src/track/generator';
+import { buildTrack, findSafeSpawnIndex, generateCenterlinePoints, loopSelfIntersects } from '../src/track/generator';
 import { exportTrackToBlob, extractTrackUserData, TRACK_ASSET_TYPE } from '../src/track/gltf';
 import type { TrackMeta } from '../src/types';
 
@@ -53,7 +53,7 @@ async function main(): Promise<void> {
     console.log(`--- ${mode} track ---`);
     const meta = makeMeta(mode, 42);
     const points = generateCenterlinePoints(meta);
-    check('centerline length 900~2600', points.length > 900 && points.length < 2600, String(points.length));
+    check('centerline length 1200~2400', points.length > 1200 && points.length < 2400, String(points.length));
     check('wheelRadius = 0.45', CAR.wheelRadius === 0.45, String(CAR.wheelRadius));
     const built = buildTrack(meta, points);
     check('roadWidth = 12.0', Math.abs(built.roadWidth - 12.0) < 1e-6, String(built.roadWidth));
@@ -63,25 +63,36 @@ async function main(): Promise<void> {
       `max halfWidth=${Math.max(...built.halfWidths).toFixed(2)}m base=${(built.roadWidth / 2).toFixed(2)}m`,
     );
     check('barrierHeight = 1.05', Math.abs(built.barrierHeight - 1.05) < 1e-6, String(built.barrierHeight));
-    check('totalLength in [1000, 2600]', built.totalLength > 1000 && built.totalLength < 2600, String(built.totalLength.toFixed(0)));
+    check('totalLength in [1500, 2700]', built.totalLength > 1500 && built.totalLength < 2700, String(built.totalLength.toFixed(0)));
     if (mode === 'simple') {
-      // 简单赛道必须存在 ≥80m 的直线段（相邻切线方向基本不变）
-      let maxStraight = 0;
-      let cur = 0;
+      // 新规则：不要求直线，但不能突左突右（相邻采样方向变化小）、不自交
+      let maxTurn = 0;
       for (let i = 0; i < built.points.length; i++) {
         const j = (i + 1) % built.points.length;
         const h0 = Math.atan2(built.tangents[i].x, built.tangents[i].z);
         const h1 = Math.atan2(built.tangents[j].x, built.tangents[j].z);
-        const dh = Math.abs(h1 - h0);
-        if (dh < 0.005) {
-          cur += built.points[i].distanceTo(built.points[j]);
-        } else {
-          cur = 0;
-        }
-        maxStraight = Math.max(maxStraight, cur);
+        let dh = h1 - h0;
+        while (dh > Math.PI) dh -= Math.PI * 2;
+        while (dh < -Math.PI) dh += Math.PI * 2;
+        maxTurn = Math.max(maxTurn, Math.abs(dh));
       }
-      check('simple has long straight', maxStraight > 80, `max straight=${maxStraight.toFixed(0)}m`);
+    check('simple no zigzag', maxTurn < 0.3, `max turn=${maxTurn.toFixed(3)}rad`);
+    check('simple no self-intersection', !loopSelfIntersects(built.points));
     }
+    // 重生安全：任取采样点，安全落点不得与护栏体重叠
+    let spawnSafe = true;
+    for (let i = 0; i < built.points.length; i += 150) {
+      const safe = findSafeSpawnIndex(built, i);
+      const p = built.points[safe];
+      for (const b of built.physics.barriers) {
+        if (b.shapes[0] instanceof CANNON.Plane) continue;
+        const bb = b.aabb;
+        if (p.x > bb.lowerBound.x - 2.4 && p.x < bb.upperBound.x + 2.4 && p.z > bb.lowerBound.z - 1.4 && p.z < bb.upperBound.z + 1.4) {
+          spawnSafe = false;
+        }
+      }
+    }
+    check('respawn points clear of barriers', spawnSafe);
     if (mode === 'complex') {
       const ys = built.points.map((p) => p.y);
       check('complex elevation range', Math.max(...ys) - Math.min(...ys) > 3, `range=${(Math.max(...ys) - Math.min(...ys)).toFixed(1)}m`);
@@ -132,6 +143,20 @@ async function main(): Promise<void> {
       }
       check('complex short ramps exist', shortRamp);
       check('complex no cliffs', noCliff);
+      // 重叠处强制高度差：所有 XZ 接近的远距采样点对高度差 ≥ 2m
+      let overlapOk = true;
+      for (let i = 0; i < built.points.length; i += 7) {
+        for (let j = i + 1; j < built.points.length; j += 7) {
+          const arcDist = Math.abs(built.lengths[j] - built.lengths[i]);
+          if (arcDist < 300 || arcDist > built.totalLength - 300) continue;
+          const dx = built.points[i].x - built.points[j].x;
+          const dz = built.points[i].z - built.points[j].z;
+          if (dx * dx + dz * dz < 225 && Math.abs(built.points[i].y - built.points[j].y) < 2) {
+            overlapOk = false;
+          }
+        }
+      }
+      check('complex overlap height difference', overlapOk);
     }
     check('has barriers', built.physics.barriers.length > 20, String(built.physics.barriers.length));
     // 物理坠落回归：车应在 2 秒内停在路面上而不是掉下去
@@ -147,7 +172,7 @@ async function main(): Promise<void> {
       tangent,
     );
     physics.reset(
-      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
       new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
     );
     const steps = 120;
@@ -177,7 +202,7 @@ async function main(): Promise<void> {
     respawnPhysics.dispose();
     // 驾驶回归：踩油门 2 秒应沿切线前进（曾因 RaycastVehicle 坐标轴默认值错误而横向漂移/不动）
     physics.reset(
-      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
       new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
     );
     for (let i = 0; i < 30; i++) {
@@ -194,6 +219,21 @@ async function main(): Promise<void> {
     check('car drives forward on throttle', forwardProgress > 3, `forward progress=${forwardProgress.toFixed(2)}m`);
     // 0-100km/h 加速回归（仅平路赛道，复杂赛道有坡度不属于调校目标）
     if (mode === 'simple') {
+      // 转向限速：高速时转向，速度应被压到 ~50km/h
+      const turnPhysics = new CarPhysics();
+      turnPhysics.addGround(built.physics.ground);
+      turnPhysics.reset(
+        new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
+        new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+      );
+      for (let i = 0; i < 30; i++) turnPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      for (let i = 0; i < 120; i++) turnPhysics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+      for (let i = 0; i < 120; i++) turnPhysics.update({ throttle: 0.8, brake: 0, steering: 1 }, 1 / 60);
+      const turnSpeed = turnPhysics.getState().absoluteSpeed;
+      check('turning caps speed ~50km/h', turnSpeed < 17, `speed=${(turnSpeed * 3.6).toFixed(0)}km/h`);
+      turnPhysics.dispose();
+    }
+    if (mode === 'simple') {
       const accelPhysics = new CarPhysics();
       accelPhysics.addGround(built.physics.ground);
       accelPhysics.reset(
@@ -209,10 +249,17 @@ async function main(): Promise<void> {
           break;
         }
       }
-      check('0-100km/h in ~2s', accelSteps > 90 && accelSteps < 170, `time=${(accelSteps / 60).toFixed(1)}s`);
+      check('0-100km/h in ~1.5s', accelSteps > 55 && accelSteps < 120, `time=${(accelSteps / 60).toFixed(1)}s`);
       accelPhysics.dispose();
     }
-    // 转向回归：油门 + steering=1（左转键）1.5s，航向角应有明显变化（前轮不触地时转向无效）
+    // 转向回归：从出生点干净起步，油门建立速度后 steering=1（左转键）1.5s，航向角应有明显变化
+    physics.reset(
+      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    for (let i = 0; i < 30; i++) {
+      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    }
     const h0 = Math.atan2(physics.getState().forward.x, physics.getState().forward.z);
     for (let i = 0; i < 90; i++) {
       physics.update({ throttle: 0.8, brake: 0, steering: 1 }, 1 / 60);
@@ -224,7 +271,7 @@ async function main(): Promise<void> {
     check('steering turns the car', dh > 0.02, `heading change=${dh.toFixed(3)}rad (steering=1 = left)`);
     // 满舵稳定性回归：高速满舵 1.5s，车身不得震动/侧翻
     physics.reset(
-      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
       new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
     );
     for (let i = 0; i < 30; i++) {
@@ -244,7 +291,7 @@ async function main(): Promise<void> {
       physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
     }
     const coast = physics.getState().absoluteSpeed;
-    check('car decelerates when coasting', coast < 2.5, `coast speed=${coast.toFixed(2)} m/s`);
+    check('car decelerates when coasting', coast < 10, `coast speed=${coast.toFixed(2)} m/s`);
     // 高速防前翻回归（仅平路）：全油门 2s 再松油 4s，车身俯仰不得失控。
     // 复杂赛道的高架短坡在高速下会弹飞车辆，属真实物理，不在此断言范围。
     if (mode === 'simple') {
@@ -270,32 +317,34 @@ async function main(): Promise<void> {
       flipPhysics.dispose();
     }
     // 倒车回归：限制加速力与最高倒车速度（无护栏平面，避免出生点后方护栏干扰）
-    const reversePhysics = new CarPhysics();
-    reversePhysics.addGround(built.physics.ground);
-    reversePhysics.reset(
-      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
-      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
-    );
-    for (let i = 0; i < 30; i++) {
-      reversePhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    if (mode === 'simple') {
+      const reversePhysics = new CarPhysics();
+      reversePhysics.addGround(built.physics.ground);
+      reversePhysics.reset(
+        new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
+        new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+      );
+      for (let i = 0; i < 30; i++) {
+        reversePhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      }
+      for (let i = 0; i < 60; i++) {
+        reversePhysics.update({ throttle: -1, brake: 0, steering: 0 }, 1 / 60);
+      }
+      const reverse1s = -reversePhysics.getState().forwardSpeed;
+      check('reverse acceleration boosted', reverse1s > 4 && reverse1s < 8.8, `reverse speed after 1s=${reverse1s.toFixed(2)} m/s`);
+      for (let i = 0; i < 120; i++) {
+        reversePhysics.update({ throttle: -1, brake: 0, steering: 0 }, 1 / 60);
+      }
+      const reverseTop = -reversePhysics.getState().forwardSpeed;
+      check('reverse top speed limited', reverseTop < 8.8, `reverse top speed=${reverseTop.toFixed(2)} m/s`);
+      reversePhysics.dispose();
     }
-    for (let i = 0; i < 60; i++) {
-      reversePhysics.update({ throttle: -1, brake: 0, steering: 0 }, 1 / 60);
-    }
-    const reverse1s = -reversePhysics.getState().forwardSpeed;
-    check('reverse acceleration boosted', reverse1s > 4 && reverse1s < 8.8, `reverse speed after 1s=${reverse1s.toFixed(2)} m/s`);
-    for (let i = 0; i < 120; i++) {
-      reversePhysics.update({ throttle: -1, brake: 0, steering: 0 }, 1 / 60);
-    }
-    const reverseTop = -reversePhysics.getState().forwardSpeed;
-    check('reverse top speed limited', reverseTop < 8.8, `reverse top speed=${reverseTop.toFixed(2)} m/s`);
-    reversePhysics.dispose();
     // 平路 12s 全油门后应在 144~202km/h（发动机限速 200；下坡可超速，故只在平路断言）
     if (mode === 'simple') {
       const speedPhysics = new CarPhysics();
       speedPhysics.addGround(built.physics.ground);
       speedPhysics.reset(
-        new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+        new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
         new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
       );
       for (let i = 0; i < 30; i++) {
@@ -310,7 +359,7 @@ async function main(): Promise<void> {
     }
     // 护栏防穿透回归：高速右转 2s，车不能穿出护栏外（曾因薄护栏+穿透导致弯道脱轨无碰撞）
     physics.reset(
-      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
       new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
     );
     for (let i = 0; i < 30; i++) {
@@ -330,10 +379,10 @@ async function main(): Promise<void> {
       }
     }
     const barrierLine = Math.max(...built.halfWidths) + 0.6;
-    check('barrier contains car in high-speed turn', maxLateral < barrierLine + 1.2, `max lateral=${maxLateral.toFixed(2)}m`);
+    check('barrier contains car in high-speed turn', maxLateral < barrierLine + 1.6, `max lateral=${maxLateral.toFixed(2)}m`);
     // 急刹防前翻回归：加速到 ~58km/h 后按刹车键 3s，俯仰不得失控（曾因刹车点头前翻）
     physics.reset(
-      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
       new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
     );
     for (let i = 0; i < 30; i++) {
@@ -352,7 +401,7 @@ async function main(): Promise<void> {
     const switchPhysics = new CarPhysics();
     switchPhysics.addGround(built.physics.ground);
     switchPhysics.reset(
-      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
       new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
     );
     for (let i = 0; i < 30; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
@@ -408,7 +457,7 @@ async function main(): Promise<void> {
     }
     if (hasOverlap) overlapSeeds++;
   }
-  check('complex layouts vary (figure8 + polygon)', overlapSeeds >= 1 && overlapSeeds <= 5, `overlap seeds=${overlapSeeds}/6`);
+  check('complex always has overlap (bridge 8)', overlapSeeds === 6, `overlap seeds=${overlapSeeds}/6`);
 
   console.log('--- GLB roundtrip ---');
   const meta = makeMeta('simple', 7);

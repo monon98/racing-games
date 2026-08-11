@@ -38,102 +38,139 @@ function smoothstep(x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function pushSampled(from: THREE.Vector3, to: THREE.Vector3, out: THREE.Vector3[]): void {
-  const len = from.distanceTo(to);
-  if (len < 0.8) return;
-  const n = Math.max(1, Math.round(len / SAMPLE_SPACING));
-  for (let k = 1; k <= n; k++) {
-    out.push(from.clone().lerp(to, k / n));
+/** 按目标长度缩放闭环 */
+function scaleLoop(points: THREE.Vector3[], targetLength: number): THREE.Vector3[] {
+  let len = 0;
+  for (let i = 0; i < points.length; i++) {
+    len += points[i].distanceTo(points[(i + 1) % points.length]);
   }
+  const s = targetLength / Math.max(1, len);
+  return points.map((p) => new THREE.Vector3(p.x * s, p.y, p.z * s));
 }
 
-function pushArc(
-  center: THREE.Vector3,
-  start: THREE.Vector3,
-  end: THREE.Vector3,
-  out: THREE.Vector3[],
-): void {
-  const v0 = start.clone().sub(center);
-  const radius = v0.length();
-  if (radius < 1) return;
-  const angle = Math.acos(
-    Math.max(-1, Math.min(1, v0.clone().normalize().dot(end.clone().sub(center).normalize()))),
-  );
-  const steps = Math.max(3, Math.round((radius * angle) / SAMPLE_SPACING));
-  for (let k = 1; k <= steps; k++) {
-    const t = k / steps;
-    out.push(center.clone().add(v0.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle * t)));
-  }
+function orient(a1: number, a2: number, b1: number, b2: number, c1: number, c2: number): number {
+  return (b1 - a1) * (c2 - a2) - (b2 - a2) * (c1 - a1);
 }
 
-/** 凸多边形 + 圆角闭环（y=0）：保证至少一条长直线，弯道为光滑圆弧且保持趋势 */
-function generatePolygonLoop(rng: () => number, totalTarget: number): THREE.Vector3[] {
-  const vertexCount = 5 + Math.floor(rng() * 3); // 5~7 条边
-  const angles: number[] = [];
-  for (let i = 0; i < vertexCount; i++) {
-    angles.push((i / vertexCount) * Math.PI * 2 + (rng() - 0.5) * 0.35);
-  }
-  angles.sort((a, b) => a - b);
-  // 保证至少一条长边（直线段）：把最大角空隙扩到 ≥ 105°
-  let maxGap = 0;
-  let maxGapIdx = 0;
-  for (let i = 0; i < vertexCount; i++) {
-    const next = i === vertexCount - 1 ? angles[0] + Math.PI * 2 : angles[i + 1];
-    const gap = next - angles[i];
-    if (gap > maxGap) {
-      maxGap = gap;
-      maxGapIdx = i;
+function segIntersect(
+  a1: number, a2: number, b1: number, b2: number,
+  c1: number, c2: number, d1: number, d2: number,
+): boolean {
+  const o1 = orient(a1, a2, b1, b2, c1, c2);
+  const o2 = orient(a1, a2, b1, b2, d1, d2);
+  const o3 = orient(c1, c2, d1, d2, a1, a2);
+  const o4 = orient(c1, c2, d1, d2, b1, b2);
+  return ((o1 > 0 && o2 < 0) || (o1 < 0 && o2 > 0)) && ((o3 > 0 && o4 < 0) || (o3 < 0 && o4 > 0));
+}
+
+/** 闭环是否在 XZ 平面自交（非相邻段） */
+export function loopSelfIntersects(points: THREE.Vector3[]): boolean {
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;
+      if (segIntersect(
+        points[i].x, points[i].z, points[(i + 1) % n].x, points[(i + 1) % n].z,
+        points[j].x, points[j].z, points[(j + 1) % n].x, points[(j + 1) % n].z,
+      )) return true;
     }
   }
-  if (maxGap < (105 * Math.PI) / 180) {
-    angles[(maxGapIdx + 1) % vertexCount] += (110 * Math.PI) / 180 - maxGap;
-    angles.sort((a, b) => a - b);
-  }
-  const vertices = angles.map((a) => {
-    const r = 0.75 + rng() * 0.5;
-    return new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r);
-  });
-  let perimeter = 0;
-  for (let i = 0; i < vertexCount; i++) {
-    perimeter += vertices[i].distanceTo(vertices[(i + 1) % vertexCount]);
-  }
-  const scale = totalTarget / perimeter;
-  for (const v of vertices) v.multiplyScalar(scale);
-
-  const corners = vertices.map((curr, i) => {
-    const prev = vertices[(i - 1 + vertexCount) % vertexCount];
-    const next = vertices[(i + 1) % vertexCount];
-    const inDir = curr.clone().sub(prev).normalize();
-    const outDir = next.clone().sub(curr).normalize();
-    const r = Math.min(curr.distanceTo(prev) * 0.4, curr.distanceTo(next) * 0.4, 30 + rng() * 35);
-    return {
-      center: curr.clone(),
-      start: curr.clone().sub(inDir.clone().multiplyScalar(r)),
-      end: curr.clone().add(outDir.clone().multiplyScalar(r)),
-    };
-  });
-
-  const points: THREE.Vector3[] = [];
-  points.push(corners[0].start.clone());
-  pushArc(corners[0].center, corners[0].start, corners[0].end, points);
-  for (let i = 1; i < vertexCount; i++) {
-    pushSampled(corners[i - 1].end, corners[i].start, points);
-    pushArc(corners[i].center, corners[i].start, corners[i].end, points);
-  }
-  pushSampled(corners[vertexCount - 1].end, corners[0].start, points);
-  return points;
+  return false;
 }
 
-/** 简单赛道：多边形圆角，长度 1200~2200m 随机 */
+/** 简单赛道：随机控制点 + Catmull-Rom 闭环（不要求直线；光滑、不突左突右；自交则换种子重试） */
 function generateSimpleTrack(meta: TrackMeta): THREE.Vector3[] {
   const rng = mulberry32(meta.seed);
-  return generatePolygonLoop(rng, 1200 + rng() * 1000);
+  const targetLength = 1600 + rng() * 1000; // 1600~2600m 随机
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const count = 8 + Math.floor(rng() * 4);
+    const base = 80 + rng() * 30;
+    const p1 = rng() * Math.PI * 2;
+    const p2 = rng() * Math.PI * 2;
+    const p3 = rng() * Math.PI * 2;
+    const controls: THREE.Vector3[] = [];
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + (rng() - 0.5) * 0.15;
+      const r = Math.max(
+        30,
+        base + 26 * Math.sin(3 * angle + p1) + 14 * Math.sin(5 * angle + p2) + 7 * Math.sin(7 * angle + p3) + (rng() - 0.5) * 10,
+      );
+      controls.push(new THREE.Vector3(Math.cos(angle) * r, 0, Math.sin(angle) * r));
+    }
+    const curve = new THREE.CatmullRomCurve3(controls, true, 'catmullrom', 0.6);
+    // 按目标长度采样（缩放后间距约 1.2m）
+    const steps = Math.max(300, Math.round(targetLength / SAMPLE_SPACING));
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i < steps; i++) pts.push(curve.getPoint(i / steps));
+    const scaled = scaleLoop(pts, targetLength);
+    if (!loopSelfIntersects(scaled)) return scaled;
+  }
+  // 兜底：平滑星形（必然简单）
+  const controls: THREE.Vector3[] = [];
+  for (let i = 0; i < 10; i++) {
+    const angle = (i / 10) * Math.PI * 2;
+    controls.push(new THREE.Vector3(Math.cos(angle) * (100 + 18 * Math.sin(3 * angle)), 0, Math.sin(angle) * (100 + 18 * Math.sin(3 * angle))));
+  }
+  const curve = new THREE.CatmullRomCurve3(controls, true, 'catmullrom', 0.5);
+  const steps = Math.max(300, Math.round(targetLength / SAMPLE_SPACING));
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i < steps; i++) pts.push(curve.getPoint(i / steps));
+  return scaleLoop(pts, targetLength);
 }
 
-/** 高度规则：弯道平台（不倾斜），直道上用尽量短的坡实现水平差（可连续） */
-function assignElevation(points: THREE.Vector3[], rng: () => number): number[] {
+/** 随机有机八字：两片 Catmull-Rom 叶瓣在中心交叉（非圆环） */
+function generateFigureEight(rng: () => number, targetLength: number): THREE.Vector3[] {
+  const lobe = (side: number): THREE.Vector3[] => {
+    const count = 4 + Math.floor(rng() * 3); // 4~6 控制点
+    const baseR = 95 + rng() * 45;
+    const pts: THREE.Vector3[] = [new THREE.Vector3(0, 0, 0)];
+    for (let i = 0; i < count; i++) {
+      const t = (i + 1) / (count + 1);
+      const angle = Math.PI * (0.5 + t); // 从上（π/2）扫到下（3π/2），x<0 侧
+      const r = baseR * (0.65 + rng() * 0.7);
+      const z = Math.sin(angle) * r * (0.7 + rng() * 0.6);
+      pts.push(new THREE.Vector3(side * -Math.cos(angle) * r, 0, z));
+    }
+    pts.push(new THREE.Vector3(0, 0, 0));
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5);
+    const steps = Math.max(200, Math.round((targetLength / 2) / SAMPLE_SPACING));
+    const out: THREE.Vector3[] = [];
+    for (let i = 1; i <= steps; i++) out.push(curve.getPoint(i / steps));
+    return out;
+  };
+  return [...lobe(-1), ...lobe(1)];
+}
+
+/** 复杂赛道：随机有机八字 / lemniscate（均非圆环、中心交叉）；加海拔区段与重叠高度差 */
+function generateComplexTrack(meta: TrackMeta): THREE.Vector3[] {
+  const rng = mulberry32(meta.seed);
+  const targetLength = 1800 + rng() * 800; // 1800~2600m 随机
+  let flat: THREE.Vector3[];
+  if (rng() < 0.55) {
+    // 随机有机八字
+    flat = generateFigureEight(rng, targetLength);
+  } else {
+    // lemniscate 8
+    flat = [];
+    const steps = Math.max(400, Math.round(targetLength / SAMPLE_SPACING));
+    for (let k = 0; k < steps; k++) {
+      const t = (k / steps) * Math.PI * 2;
+      const s = 1 + Math.sin(t) ** 2;
+      flat.push(new THREE.Vector3(Math.cos(t) / s, 0, (Math.sin(t) * Math.cos(t)) / s));
+    }
+  }
+  const scaled = scaleLoop(flat, targetLength);
+  const heights = assignAltitudeSegments(scaled, rng);
+  return scaled.map((p, i) => new THREE.Vector3(p.x, heights[i], p.z));
+}
+
+/** 海拔区段：段内平台（弯道水平）、段界短坡；重叠处强制高度差 */
+function assignAltitudeSegments(points: THREE.Vector3[], rng: () => number): number[] {
   const n = points.length;
-  // 曲率（相邻切线航向差 / 弧长）
+  let segCount = 4 + Math.floor(rng() * 4); // 4~7 段
+  const levels = [0, 3, 6];
+
+  // 曲率
   const curv: number[] = new Array(n).fill(0);
   for (let i = 0; i < n; i++) {
     const prev = (i - 1 + n) % n;
@@ -143,151 +180,131 @@ function assignElevation(points: THREE.Vector3[], rng: () => number): number[] {
     let dh = h1 - h0;
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
-    const segLen = Math.max(0.1, points[prev].distanceTo(points[next]));
-    curv[i] = Math.abs(dh) / segLen;
+    curv[i] = Math.abs(dh) / Math.max(0.1, points[prev].distanceTo(points[next]));
   }
-  const CORNER_CURVE = 0.006;
-  // 连续弯道区域编号（环形）
-  const regionId: number[] = new Array(n).fill(-1);
-  let rid = 0;
-  for (let i = 0; i < n; i++) {
-    if (curv[i] > CORNER_CURVE) {
-      if (i === 0 || curv[i - 1] <= CORNER_CURVE) rid++;
-      regionId[i] = rid;
+  // 重叠对（XZ 接近、弧长距离大）
+  const overlapPairs: Array<[number, number]> = [];
+  for (let i = 0; i < n; i += 7) {
+    for (let j = i + 1; j < n; j += 7) {
+      const idxDist = Math.min(j - i, n - (j - i));
+      if (idxDist < n / 4) continue;
+      const dx = points[i].x - points[j].x;
+      const dz = points[i].z - points[j].z;
+      if (dx * dx + dz * dz < 225) overlapPairs.push([i, j]);
     }
   }
-  // 首尾弯道区域合并（若最后一段也是弯道且与开头弯道相连）
-  if (regionId[0] >= 0 && regionId[n - 1] >= 0 && regionId[n - 1] === rid) {
-    for (let i = 0; i < n && regionId[i] >= 0; i++) regionId[i] = rid;
+  // 交叉点集合：段界要避开交叉点（保证重叠处落在平台而非坡上）
+  const crossSet = new Set<number>();
+  for (const [i, j] of overlapPairs) {
+    crossSet.add(i);
+    crossSet.add(j);
   }
-  // 兜底：若弯道区域少于 2 个（如纯八字曲线无“直线”），按最高曲率点强制制造 2 个平台区域
-  if (rid < 2) {
-    const forceRegion = (centerIdx: number, id: number, halfSpan: number): void => {
-      for (let k = -halfSpan; k <= halfSpan; k++) {
-        regionId[(centerIdx + k + n) % n] = id;
-      }
-    };
-    let maxC1 = 0;
-    let maxI1 = 0;
-    for (let i = 0; i < n; i++) {
-      if (curv[i] > maxC1) {
-        maxC1 = curv[i];
-        maxI1 = i;
-      }
+  const farFromCross = (idx: number): boolean => {
+    for (const c of crossSet) {
+      const d = Math.min(Math.abs(idx - c), n - Math.abs(idx - c));
+      if (d < 40) return false;
     }
-    forceRegion(maxI1, 1, Math.max(40, Math.round(n / 8)));
-    let maxC2 = 0;
-    let maxI2 = -1;
-    for (let i = 0; i < n; i++) {
-      const d = Math.min(Math.abs(i - maxI1), n - Math.abs(i - maxI1));
-      if (d > n / 4 && curv[i] > maxC2) {
-        maxC2 = curv[i];
-        maxI2 = i;
+    return true;
+  };
+  // 段界选在各等分区间内、远离交叉点的曲率最低点（坡在直道，弯道保持平台）
+  let segStart: number[] = [];
+  for (let k = 0; k < segCount; k++) {
+    const s = Math.floor((k * n) / segCount);
+    const e = Math.floor(((k + 1) * n) / segCount);
+    let best = -1;
+    let bestC = Infinity;
+    for (let i = s; i < e; i++) {
+      if (!farFromCross(i)) continue;
+      if (curv[i] < bestC) {
+        bestC = curv[i];
+        best = i;
       }
     }
-    if (maxI2 >= 0) {
-      forceRegion(maxI2, 2, Math.max(40, Math.round(n / 8)));
-      rid = 2;
-    } else {
-      rid = 1;
+    if (best < 0) best = s; // 窗口内全在交叉区时兜底
+    segStart.push(best);
+  }
+  // 保证重叠对不在同一段：同段则在两交叉点弧长中点插入段界
+  const segIndexOf = (idx: number): number => {
+    for (let k = 0; k < segStart.length; k++) {
+      const s = segStart[k];
+      const e = segStart[(k + 1) % segStart.length];
+      if (s <= e) {
+        if (idx >= s && idx < e) return k;
+      } else if (idx >= s || idx < e) {
+        return k;
+      }
+    }
+    return 0;
+  };
+  for (const [i, j] of overlapPairs) {
+    if (segIndexOf(i) === segIndexOf(j)) {
+      segStart.push(Math.floor((i + (((j - i + n) % n) / 2)) % n));
     }
   }
-  const levels = [0, 3, 6];
-  const regionHeight = new Map<number, number>();
-  for (let r = 1; r <= rid; r++) {
+  segStart.sort((a, b) => a - b);
+  segCount = segStart.length;
+
+  // 段高度（相邻不同）
+  const segH: number[] = [];
+  for (let k = 0; k < segCount; k++) {
     let h = levels[Math.floor(rng() * levels.length)];
-    if (r > 1 && h === regionHeight.get(r - 1)) h = levels[(levels.indexOf(h) + 1) % levels.length];
-    regionHeight.set(r, h);
+    if (k > 0 && h === segH[k - 1]) h = levels[(levels.indexOf(h) + 1) % levels.length];
+    segH.push(h);
   }
-  const h: number[] = new Array(n).fill(0);
-  for (let i = 0; i < n; i++) {
-    if (regionId[i] >= 0) h[i] = regionHeight.get(regionId[i]) ?? 0;
-  }
-  // 直线段：短坡连接两端平台（坡长 ~18m，可连续；两端同高则平直）
-  const rampLen = Math.max(6, Math.round(18 / SAMPLE_SPACING));
-  const fillStraight = (s: number, e: number): void => {
-    const prevR = regionId[(s - 1 + n) % n];
-    const nextR = regionId[(e + 1) % n];
-    const hA = prevR >= 0 ? (regionHeight.get(prevR) ?? 0) : 0;
-    const hB = nextR >= 0 ? (regionHeight.get(nextR) ?? 0) : 0;
-    const len = (e - s + n) % n + 1;
-    if (hA === hB) {
-      for (let k = 0; k < len; k++) h[(s + k) % n] = hA;
-      return;
+
+  // 重叠处强制高度差：重叠对所在段高度必须不同
+  for (let i = 0; i < n; i += 7) {
+    for (let j = i + 1; j < n; j += 7) {
+      const idxDist = Math.min(j - i, n - (j - i));
+      if (idxDist < n / 4) continue;
+      const dx = points[i].x - points[j].x;
+      const dz = points[i].z - points[j].z;
+      if (dx * dx + dz * dz < 225) {
+        const ki = segIndexOf(i);
+        const kj = segIndexOf(j);
+        if (ki !== kj && segH[ki] === segH[kj]) {
+          segH[kj] = levels[(levels.indexOf(segH[kj]) + 1) % levels.length];
+        }
+      }
     }
-    // 斜坡长度随高差增大（≤ 0.25 坡度），避免断崖
-    const needRamp = Math.max(rampLen, Math.round((Math.abs(hB - hA) * 4) / SAMPLE_SPACING));
-    const useRamp = Math.min(needRamp, Math.floor(len / 2));
-    const mid = s + Math.floor((len - useRamp) / 2);
+  }
+
+  // 生成剖面：段内平台 + 段界短坡（~22m，平滑）
+  const heights: number[] = new Array(n).fill(0);
+  const rampLen = Math.max(8, Math.round(22 / SAMPLE_SPACING));
+  const fillSegment = (s: number, e: number, hK: number, hNext: number): void => {
+    const len = (e - s + n) % n;
+    const effRamp = Math.min(rampLen, Math.floor(len / 2));
     for (let k = 0; k < len; k++) {
       const idx = (s + k) % n;
-      if (k < mid - s) h[idx] = hA;
-      else if (k >= mid - s + useRamp) h[idx] = hB;
-      else h[idx] = hA + (hB - hA) * smoothstep((k - (mid - s)) / Math.max(1, useRamp - 1));
+      const tFromStart = k;
+      let hh = hK;
+      if (hNext !== hK && tFromStart >= len - effRamp) {
+        const t = (tFromStart - (len - effRamp)) / Math.max(1, effRamp - 1);
+        hh = hK + (hNext - hK) * smoothstep(t);
+      }
+      heights[idx] = hh;
     }
   };
-  // 找到所有直线段（环形，含跨 0 段）
-  let s = -1;
-  for (let i = 0; i < n; i++) {
-    if (regionId[i] === -1 && regionId[(i - 1 + n) % n] !== -1) s = i;
+  for (let k = 0; k < segCount; k++) {
+    fillSegment(segStart[k], segStart[(k + 1) % segCount], segH[k], segH[(k + 1) % segCount]);
   }
-  if (s >= 0) {
-    let i = s;
-    let e = -1;
-    while (regionId[i] === -1) {
-      e = i;
-      i = (i + 1) % n;
-      if (i === s) break;
-    }
-    fillStraight(s, e);
-    // 其余直线段
-    i = (e + 1) % n;
-    while (i !== s) {
-      if (regionId[i] === -1) {
-        const ss = i;
-        let ee = i;
-        while (regionId[ee] === -1) {
-          ee = (ee + 1) % n;
-          if (ee === ss) break;
-        }
-        ee = (ee - 1 + n) % n;
-        fillStraight(ss, ee);
-        i = (ee + 1) % n;
-      } else {
-        i = (i + 1) % n;
+  // 邻点坡度直接钳制：保证无断崖（相邻高度差 ≤ 0.5m）
+  for (let pass = 0; pass < 4; pass++) {
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const d = heights[j] - heights[i];
+      if (d > 0.5) {
+        heights[j] = heights[i] + 0.5;
+      } else if (d < -0.5) {
+        heights[j] = heights[i] - 0.5;
       }
     }
   }
-  return h;
+  return heights;
 }
 
-/** 复杂赛道：布局随机（八字 / 多边形），高度=弯道平台 + 直道短坡（水平差、可连续） */
-function generateComplexTrack(meta: TrackMeta): THREE.Vector3[] {
-  const rng = mulberry32(meta.seed);
-  const totalTarget = 1400 + rng() * 800; // 1400~2200m 随机
-  let flat: THREE.Vector3[];
-  if (rng() < 0.5) {
-    // 八字形（lemniscate），中心交叉
-    const steps = Math.max(400, Math.round(totalTarget / SAMPLE_SPACING));
-    const raw: THREE.Vector3[] = [];
-    for (let k = 0; k <= steps; k++) {
-      const t = (k / steps) * Math.PI * 2;
-      const s = 1 + Math.sin(t) ** 2;
-      raw.push(new THREE.Vector3(Math.cos(t) / s, 0, (Math.sin(t) * Math.cos(t)) / s));
-    }
-    let len = 0;
-    for (let i = 1; i < raw.length; i++) len += raw[i].distanceTo(raw[i - 1]);
-    const scale = totalTarget / len;
-    flat = raw.map((p) => new THREE.Vector3(p.x * scale, 0, p.z * scale));
-  } else {
-    // 多边形圆角
-    flat = generatePolygonLoop(rng, totalTarget);
-  }
-  const heights = assignElevation(flat, rng);
-  return flat.map((p, i) => new THREE.Vector3(p.x, heights[i], p.z));
-}
-
-/** 根据种子生成闭环中心线采样点（简单=多边形圆角；复杂=八字高架桥） */
+/** 根据种子生成闭环中心线采样点（简单=随机点光滑曲线；复杂=双圆 8/lemniscate + 海拔区段） */
 export function generateCenterlinePoints(meta: TrackMeta): THREE.Vector3[] {
   return meta.mode === 'simple' ? generateSimpleTrack(meta) : generateComplexTrack(meta);
 }
@@ -415,24 +432,23 @@ function buildBarriers(
   const material = new THREE.MeshStandardMaterial({ color: 0xcf4b4b, roughness: 0.8 });
   const n = points.length;
 
-  for (let i = 0; i < points.length; i += BARRIER_STEP) {
-    const j = (i + BARRIER_STEP) % n;
+  const emitSegment = (a: number, b: number): void => {
     // 护栏段两端各取“该采样点的实际路面边缘”，与加宽后的路面精确对齐
-    const rightI = new THREE.Vector3(tangents[i].z, 0, -tangents[i].x).normalize();
-    const rightJ = new THREE.Vector3(tangents[j].z, 0, -tangents[j].x).normalize();
-    const offsetI = halfWidths[i] + BARRIER_THICKNESS / 2 + 0.08;
-    const offsetJ = halfWidths[j] + BARRIER_THICKNESS / 2 + 0.08;
+    const rightI = new THREE.Vector3(tangents[a].z, 0, -tangents[a].x).normalize();
+    const rightJ = new THREE.Vector3(tangents[b].z, 0, -tangents[b].x).normalize();
+    const offsetI = halfWidths[a] + BARRIER_THICKNESS / 2 + 0.08;
+    const offsetJ = halfWidths[b] + BARRIER_THICKNESS / 2 + 0.08;
 
     for (const side of [-1, 1]) {
       const eI = new THREE.Vector3(
-        points[i].x + rightI.x * offsetI * side,
-        points[i].y,
-        points[i].z + rightI.z * offsetI * side,
+        points[a].x + rightI.x * offsetI * side,
+        points[a].y,
+        points[a].z + rightI.z * offsetI * side,
       );
       const eJ = new THREE.Vector3(
-        points[j].x + rightJ.x * offsetJ * side,
-        points[j].y,
-        points[j].z + rightJ.z * offsetJ * side,
+        points[b].x + rightJ.x * offsetJ * side,
+        points[b].y,
+        points[b].z + rightJ.z * offsetJ * side,
       );
       const mid = eI.clone().add(eJ).multiplyScalar(0.5);
       const dir = eJ.clone().sub(eI);
@@ -455,6 +471,50 @@ function buildBarriers(
       body.quaternion.setFromEuler(0, yaw, 0);
       bodies.push(body);
 
+    }
+  };
+
+  // 弯心两侧各自发一段短护栏（本地切线朝向），避免跨弯心的长段横穿赛道
+  const emitLocalSegment = (k: number): void => {
+    const right = new THREE.Vector3(tangents[k].z, 0, -tangents[k].x).normalize();
+    const offset = halfWidths[k] + BARRIER_THICKNESS / 2 + 0.08;
+    const p = points[k];
+    const next = points[(k + 1) % n];
+    const len = Math.max(1.5, p.distanceTo(next) * 1.3);
+    const yaw = Math.atan2(tangents[k].x, tangents[k].z);
+    for (const side of [-1, 1]) {
+      const cx = p.x + right.x * offset * side;
+      const cy = p.y;
+      const cz = p.z + right.z * offset * side;
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(BARRIER_THICKNESS, barrierHeight, len), material);
+      mesh.position.set(cx, cy + barrierHeight / 2, cz);
+      mesh.rotation.y = yaw;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      visual.push(mesh);
+      const body = new CANNON.Body({
+        mass: 0,
+        shape: new CANNON.Box(new CANNON.Vec3(BARRIER_THICKNESS / 2, barrierHeight / 2, len / 2)),
+      });
+      body.position.set(cx, cy + barrierHeight / 2, cz);
+      body.quaternion.setFromEuler(0, yaw, 0);
+      bodies.push(body);
+    }
+  };
+
+  for (let i = 0; i < n; i += BARRIER_STEP) {
+    const j = (i + BARRIER_STEP) % n;
+    // 站对方向差过大（跨弯心）时两侧各自短段，否则端点连接（跟随加宽路面）
+    const hI = Math.atan2(tangents[i].x, tangents[i].z);
+    const hJ = Math.atan2(tangents[j].x, tangents[j].z);
+    let dH = hJ - hI;
+    while (dH > Math.PI) dH -= Math.PI * 2;
+    while (dH < -Math.PI) dH += Math.PI * 2;
+    if (Math.abs(dH) > 0.6) {
+      emitLocalSegment(i);
+      emitLocalSegment(j);
+    } else {
+      emitSegment(i, j);
     }
   }
   return { visual, bodies };
@@ -483,6 +543,37 @@ function computeHalfWidths(
   }
   // 平滑，避免宽度突变
   return raw.map((w, i) => (raw[(i - 1 + n) % n] + w + raw[(i + 1) % n]) / 3);
+}
+
+/** 找附近不与任何护栏体重叠的安全落点（重生/出生用，避免复活后卡进护栏导致碰撞失效） */
+export function findSafeSpawnIndex(track: BuiltTrack, idx: number): number {
+  const n = track.points.length;
+  const halfW = 1.4;
+  const halfL = 2.4;
+  const tryIndex = (k: number): boolean => {
+    const p = track.points[k];
+    for (const b of track.physics.barriers) {
+      // 跳过兜底平面（无限 AABB）
+      if (b.shapes[0] instanceof CANNON.Plane) continue;
+      const bb = b.aabb;
+      if (
+        p.x > bb.lowerBound.x - halfL &&
+        p.x < bb.upperBound.x + halfL &&
+        p.z > bb.lowerBound.z - halfW &&
+        p.z < bb.upperBound.z + halfW
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+  for (let d = 0; d < n; d++) {
+    const a = (idx + d) % n;
+    const b2 = (idx - d + n) % n;
+    if (tryIndex(a)) return a;
+    if (tryIndex(b2)) return b2;
+  }
+  return idx;
 }
 
 /** 由中心线构建完整赛道（视觉 + 物理） */

@@ -19,11 +19,13 @@ export interface VehicleState {
 }
 
 const MAX_STEER = 0.65;
-// 目标：0→100km/h 约 2.5s（配合线性阻尼 0.12，初始加速度约 12.9 m/s²，极速可达 200+km/h）
-const ENGINE_FORCE = 3500;
-const REVERSE_FORCE_RATIO = 0.7;
+// 目标：正向 0→100km/h 约 1.5s（初始加速度约 20 m/s²，极速 200km/h 限速不变）；
+// 倒车拿到“旧正向”档位：5500 × 0.64 ≈ 3500N/轮（约 12.9 m/s²）
+const ENGINE_FORCE = 5500;
+const REVERSE_FORCE_RATIO = 0.64;
 const REVERSE_MAX_SPEED = 8; // m/s ≈ 29 km/h
 const FORWARD_MAX_SPEED = 200 / 3.6; // 200 km/h
+const TURN_MAX_SPEED = 50 / 3.6; // 转向时最高时速 50 km/h
 const BRAKE_FORCE = 55;
 const ENGINE_BRAKE = 35;
 /** 松左右键后轮子回中速度（慢）；按住转向时响应速度（快） */
@@ -148,37 +150,40 @@ export class CarPhysics {
       }
     }
 
-    // 直线稳定辅助：无转向输入时把车头逐步对齐到速度方向，减少松开转向后的侧滑
-
     this.vehicle.setSteeringValue(this.steerCurrent, 0);
     this.vehicle.setSteeringValue(this.steerCurrent, 1);
 
     // RaycastVehicle 在 right=X(0)/forward=Z(2)/up=Y(1) 配置下，
     // 正发动机力会沿 -Z 推（实测倒车），因此取反：正油门 = 向前(+Z)。
     let force = -input.throttle * ENGINE_FORCE;
+    // 转向时不允许无限加速：转向越深动力越低（满舵约 55% 动力）
+    if (Math.abs(input.steering) > 0.05) {
+      force *= 1 - 0.45 * Math.min(1, Math.abs(input.steering));
+    }
     if (input.throttle > 0) {
-      // 前进限速 200km/h：接近上限时渐入削减动力，避免惯性超调（在 0.98×上限处完全切断）
       const fwdSpeed = this.forwardSpeed();
+      // 前进限速 200km/h：接近上限时渐入削减动力，避免惯性超调（在 0.98×上限处完全切断）
       if (fwdSpeed >= FORWARD_MAX_SPEED * 0.85) {
         const taper = Math.max(0, 1 - (fwdSpeed - FORWARD_MAX_SPEED * 0.85) / (FORWARD_MAX_SPEED * 0.13));
         force *= taper;
       }
-      // 防抬头后翻：按俯仰角平滑削减动力（允许短促抬头起步，随抬头逐渐限功）
+      // 转向时最高时速衰减到 50km/h
+      if (Math.abs(input.steering) > 0.05 && fwdSpeed > TURN_MAX_SPEED * 0.9) {
+        const taper = Math.max(0, 1 - (fwdSpeed - TURN_MAX_SPEED * 0.9) / (TURN_MAX_SPEED * 0.1));
+        force *= taper;
+      }
+      // 防抬头后翻：PD 反扭矩（等效“防抬头杠”），把车头压回，不损失动力
       const up = new CANNON.Vec3(0, 1, 0);
       this.chassis.quaternion.vmult(up, up);
       const pitch = Math.acos(Math.max(-1, Math.min(1, up.y)));
-      if (pitch > 0.1) {
-        force *= Math.max(0.05, 1 - (pitch - 0.1) * 2.2);
-      }
-      if (pitch > 0.12) {
-        // 俯仰角速度阻尼：衰减绕侧轴的角速度，直接阻止抬头翻车
+      if (pitch > 0.04) {
         const right = new CANNON.Vec3(1, 0, 0);
         this.chassis.quaternion.vmult(right, right);
-        const pitchAngVel = this.chassis.angularVelocity.dot(right);
-        const damp = pitchAngVel * 0.6;
-        this.chassis.angularVelocity.x -= right.x * damp;
-        this.chassis.angularVelocity.y -= right.y * damp;
-        this.chassis.angularVelocity.z -= right.z * damp;
+        const pitchRate = -this.chassis.angularVelocity.dot(right); // 正=抬头速率
+        const counter = Math.min(15000, 90000 * pitch + 4000 * Math.max(0, pitchRate));
+        this.chassis.torque.x += right.x * counter;
+        this.chassis.torque.y += right.y * counter;
+        this.chassis.torque.z += right.z * counter;
       }
     } else if (input.throttle < 0) {
       // 倒车限制：更小的加速力 + 最高倒车速度
@@ -187,6 +192,7 @@ export class CarPhysics {
         force = 0;
       }
     }
+    // 后驱：动力给后轮（前轮起步抓地不足会浪费动力）
     this.vehicle.applyEngineForce(force, 2);
     this.vehicle.applyEngineForce(force, 3);
 

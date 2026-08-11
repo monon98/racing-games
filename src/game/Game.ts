@@ -11,7 +11,7 @@ import {
 } from '../config';
 import { CarPhysics, CHASSIS_SPAWN_HEIGHT, type VehicleInput } from '../physics/vehicle';
 import { addLeaderboardEntry } from '../storage/db';
-import type { BuiltTrack } from '../track/generator';
+import { findSafeSpawnIndex, type BuiltTrack } from '../track/generator';
 import { createHUD, type HudRefs } from '../ui/hud';
 import { drawMinimap } from '../ui/minimap';
 import { updateLapProgress } from './lapProgress';
@@ -114,7 +114,8 @@ export class Game {
     this.flashEl.className = 'collision-flash';
     container.appendChild(this.flashEl);
 
-    const start = track.points[0];
+    const startIdx = findSafeSpawnIndex(track, 0);
+    const start = track.points[startIdx];
     const tangent = track.tangents[0].clone();
     tangent.y = 0;
     tangent.normalize();
@@ -252,7 +253,7 @@ export class Game {
   private respawn(reason: 'flip' | 'offtrack'): void {
     if (reason === 'flip') this.flips += 1;
     const state = this.physics.getState();
-    const idx = this.nearestIndex(state.position);
+    const idx = findSafeSpawnIndex(this.track, this.nearestIndex(state.position));
     const respawnS = this.track.lengths[idx];
     if (respawnS < this.lastS) {
       this.distancePenaltyM += this.lastS - respawnS;
