@@ -380,6 +380,23 @@ async function main(): Promise<void> {
     }
     const barrierLine = Math.max(...built.halfWidths) + 0.6;
     check('barrier contains car in high-speed turn', maxLateral < barrierLine + 1.6, `max lateral=${maxLateral.toFixed(2)}m`);
+    // 高速过丘陵不飞射：复杂赛道（高架起伏）全油门 6s，最大上升速度应被钳制在 ~1m/s 内
+    if (mode === 'complex') {
+      const airPhysics = new CarPhysics();
+      airPhysics.addGround(built.physics.ground);
+      airPhysics.reset(
+        new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
+        new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+      );
+      for (let i = 0; i < 30; i++) airPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      let maxVy = 0;
+      for (let i = 0; i < 360; i++) {
+        airPhysics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+        maxVy = Math.max(maxVy, airPhysics.getState().velocity.y);
+      }
+      check('no upward launch on hills', maxVy < 1.0, `max upward speed=${maxVy.toFixed(2)} m/s`);
+      airPhysics.dispose();
+    }
     // 急刹防前翻回归：加速到 ~58km/h 后按刹车键 3s，俯仰不得失控（曾因刹车点头前翻）
     physics.reset(
       new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),

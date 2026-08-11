@@ -19,15 +19,17 @@ export interface VehicleState {
 }
 
 const MAX_STEER = 0.65;
-// 目标：正向 0→100km/h 约 1.5s（初始加速度约 20 m/s²，极速 200km/h 限速不变）；
-// 倒车拿到“旧正向”档位：5500 × 0.64 ≈ 3500N/轮（约 12.9 m/s²）
-const ENGINE_FORCE = 5500;
-const REVERSE_FORCE_RATIO = 0.64;
+// 质量加重（抗飞起）；发动机力同步提高保持 0-100 约 1.5s（7500×2/750≈20 m/s²）；
+// 倒车约等于旧正向加速：7500 × 0.65 ≈ 4875N/轮
+const ENGINE_FORCE = 7500;
+const REVERSE_FORCE_RATIO = 0.65;
 const REVERSE_MAX_SPEED = 8; // m/s ≈ 29 km/h
 const FORWARD_MAX_SPEED = 200 / 3.6; // 200 km/h
 const TURN_MAX_SPEED = 50 / 3.6; // 转向时最高时速 50 km/h
 const BRAKE_FORCE = 55;
-const ENGINE_BRAKE = 35;
+const ENGINE_BRAKE = 50;
+/** 空中上升速度上限（m/s），限制上坡/过顶时的飞起幅度（约 0.6m 高） */
+const MAX_AIR_UPWARD_SPEED = 3.5;
 /** 松左右键后轮子回中速度（慢）；按住转向时响应速度（快） */
 const STEER_RETURN_RATE = 3;
 const STEER_APPLY_RATE = 7;
@@ -57,7 +59,7 @@ export class CarPhysics {
       new CANNON.Vec3(CAR.width / 2 - 0.05, CAR.height * 0.26, CAR.length / 2 - 0.05),
     );
     this.chassis = new CANNON.Body({
-      mass: 550,
+      mass: 750,
       // 线性阻尼模拟空气阻力/滚动阻力，避免松油门后滑行过长
       // 线性阻尼 0.12：极速可达 200+km/h，松油仍能缓慢减速
       linearDamping: 0.12,
@@ -83,8 +85,8 @@ export class CarPhysics {
       suspensionRestLength: 0.38,
       maxSuspensionTravel: 0.25,
       frictionSlip: 3.2,
-      dampingRelaxation: 4.0,
-      dampingCompression: 11,
+      dampingRelaxation: 6.0,
+      dampingCompression: 14,
       maxSuspensionForce: 200000,
       rollInfluence: 0.08,
       axleLocal: new CANNON.Vec3(-1, 0, 0),
@@ -205,6 +207,15 @@ export class CarPhysics {
     this.vehicle.setBrake(brake, 3);
 
     this.world.step(this.fixedTimeStep, dt, this.maxSubSteps);
+
+    // 空中垂直速度钳制：四轮离地时限制上升速度，避免高速上坡/过顶时飞太高
+    let wheelsOnGround = 0;
+    for (const w of this.vehicle.wheelInfos) {
+      if (w.isInContact) wheelsOnGround++;
+    }
+    if (wheelsOnGround === 0 && this.chassis.velocity.y > MAX_AIR_UPWARD_SPEED) {
+      this.chassis.velocity.y = MAX_AIR_UPWARD_SPEED;
+    }
   }
 
   getState(): VehicleState {
