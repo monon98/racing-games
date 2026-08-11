@@ -12,7 +12,7 @@
 | 6 | 启动页：排行榜（跟随赛道）、开始、颜色、重新生成（选项+清榜提示）、导入/导出、玩家名称 | `StartPage` 全部实现 | MVP |
 | 7 | 游戏页：小地图（俯视）、正常画面、速度展示 | 2D Canvas 小地图 + 追尾相机 + HUD 速度/计时 | MVP |
 | 8 | 轮子转动、较真实碰撞、翻车/脱轨、无法正常行驶时重生并给距离+时间惩罚 | cannon-es RaycastVehicle + 翻车/脱轨检测 + 重生惩罚 | MVP |
-| 9 | 车与赛道按比例；赛道两边护栏=车高一半 | 常量 `ROAD_WIDTH_MULTIPLIER=5.0`（5 倍车宽，用户要求加宽）、`BARRIER_HEIGHT_FACTOR=0.5` | MVP |
+| 9 | 车与赛道按比例；赛道两边护栏=车高一半 | 常量 `ROAD_WIDTH_MULTIPLIER=6.0`（6 倍车宽，用户要求加宽）+ 弯道按曲率加宽、`BARRIER_HEIGHT_FACTOR=0.5` | MVP |
 | 10 | WASD/方向键、空格暂停、返回首页按钮 | `Game.ts` 键盘控制 + HUD 按钮 | MVP |
 
 ## 补充规则（已确认）

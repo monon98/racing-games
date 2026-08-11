@@ -63,6 +63,12 @@
 - 复测：58km/h 急刹俯仰峰值 10.9°，约 2.8s 平稳刹停；松油（发动机制动）与急刹都不再前翻。
 - 回归防护：`pnpm smoke` 新增“急刹不翻（up.y > 0.6）”断言（simple/complex 均覆盖）。
 
+## 2026-08-11 赛车模型优化 / 赛道再加宽（同日第六次调整）
+- 赛车模型：车身/座舱/尾翼整体降低（车身 0.55→0.42、座舱 1.02→0.78），造型更流线；追尾相机降到 2.65m、拉近到 7.6m、前视 4m，前轮转向状态清晰可见（`src/car/createCar.ts`、`src/game/Game.ts`）。
+- 赛道再加宽：`ROAD_WIDTH_MULTIPLIER` 5 → 6（基础宽 12m）。
+- 弯道按转角加宽：`computeHalfWidths` 按相邻切线航向差估算曲率，宽度因子 = 1 + min(0.4, 曲率×16)，并做平滑；路面、护栏、起终点线、脱轨判定全部跟随局部宽度（`BuiltTrack.halfWidths`，`src/track/generator.ts` + `src/game/Game.ts`）。
+- 回归防护：`pnpm smoke` 新增“基础宽 12m”“弯道半宽大于基础半宽”断言，护栏防穿透测试改用最大局部半宽。
+
 ## 后续待讨论
 - M3 范围：环境装饰（树/石头）、音效与光影、多文件 `.gltf+.bin` 导入、vitest/代码分割（见 `docs/roadmap.md`）。
 - 驾驶手感调优参数（发动机力、悬架、转向）集中在 `src/physics/vehicle.ts` 顶部常量，改手感先动那里。

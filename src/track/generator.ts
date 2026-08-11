@@ -4,6 +4,8 @@ import {
   BARRIER_HEIGHT_FACTOR,
   BARRIER_THICKNESS,
   CAR,
+  CURVE_WIDEN_MAX,
+  CURVE_WIDEN_STRENGTH,
   ROAD_WIDTH_MULTIPLIER,
 } from '../config';
 import type { TrackMeta } from '../types';
@@ -17,6 +19,8 @@ export interface BuiltTrack {
   lengths: number[];
   totalLength: number;
   roadWidth: number;
+  /** 每个采样点的局部半宽（弯道按曲率加宽） */
+  halfWidths: number[];
   barrierHeight: number;
   group: THREE.Group;
   physics: {
@@ -85,7 +89,7 @@ function computeLengths(points: THREE.Vector3[]): { lengths: number[]; total: nu
 function buildRoadRibbon(
   points: THREE.Vector3[],
   tangents: THREE.Vector3[],
-  halfWidth: number,
+  halfWidths: number[],
 ): { geometry: THREE.BufferGeometry; positions: number[]; indices: number[] } {
   const n = points.length;
   const positions: number[] = [];
@@ -96,8 +100,9 @@ function buildRoadRibbon(
     const right = new THREE.Vector3(t.z, 0, -t.x).normalize();
     rightVectors.push(right);
     const p = points[i];
-    positions.push(p.x - right.x * halfWidth, p.y, p.z - right.z * halfWidth);
-    positions.push(p.x + right.x * halfWidth, p.y, p.z + right.z * halfWidth);
+    const hw = halfWidths[i];
+    positions.push(p.x - right.x * hw, p.y, p.z - right.z * hw);
+    positions.push(p.x + right.x * hw, p.y, p.z + right.z * hw);
   }
 
   const indices: number[] = [];
@@ -174,7 +179,7 @@ function buildGroundVisual(
 function buildBarriers(
   points: THREE.Vector3[],
   tangents: THREE.Vector3[],
-  halfWidth: number,
+  halfWidths: number[],
   barrierHeight: number,
 ): { visual: THREE.Mesh[]; bodies: CANNON.Body[] } {
   const visual: THREE.Mesh[] = [];
@@ -188,7 +193,7 @@ function buildBarriers(
     const next = points[(i + BARRIER_STEP) % points.length];
     // 段长放大 1.4 倍让相邻护栏重叠，消除弯道外侧的楔形缝隙
     const segLen = Math.max(0.4, p.distanceTo(next) * 1.4);
-    const offset = halfWidth + BARRIER_THICKNESS / 2 + 0.08;
+    const offset = halfWidths[i] + BARRIER_THICKNESS / 2 + 0.08;
     const yaw = Math.atan2(t.x, t.z);
     const halfExtents = new CANNON.Vec3(BARRIER_THICKNESS / 2, barrierHeight / 2, segLen / 2);
 
@@ -214,19 +219,44 @@ function buildBarriers(
   return { visual, bodies };
 }
 
+/** 按曲率计算每点局部半宽：直道=基础宽，弯道最多加宽 CURVE_WIDEN_MAX */
+function computeHalfWidths(
+  points: THREE.Vector3[],
+  tangents: THREE.Vector3[],
+  baseHalfWidth: number,
+): number[] {
+  const n = points.length;
+  const raw: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const prevIdx = (i - 1 + n) % n;
+    const nextIdx = (i + 1) % n;
+    const segLen = Math.max(0.1, points[prevIdx].distanceTo(points[nextIdx]));
+    const h0 = Math.atan2(tangents[prevIdx].x, tangents[prevIdx].z);
+    const h1 = Math.atan2(tangents[nextIdx].x, tangents[nextIdx].z);
+    let dHeading = h1 - h0;
+    while (dHeading > Math.PI) dHeading -= Math.PI * 2;
+    while (dHeading < -Math.PI) dHeading += Math.PI * 2;
+    const curvature = Math.abs(dHeading) / segLen;
+    const factor = 1 + Math.min(CURVE_WIDEN_MAX, curvature * CURVE_WIDEN_STRENGTH);
+    raw.push(baseHalfWidth * factor);
+  }
+  // 平滑，避免宽度突变
+  return raw.map((w, i) => (raw[(i - 1 + n) % n] + w + raw[(i + 1) % n]) / 3);
+}
+
 /** 由中心线构建完整赛道（视觉 + 物理） */
 export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltTrack {
   const points = centerline;
   const tangents = computeTangents(points);
   const { lengths, total } = computeLengths(points);
   const roadWidth = CAR.width * ROAD_WIDTH_MULTIPLIER;
-  const halfWidth = roadWidth / 2;
+  const halfWidths = computeHalfWidths(points, tangents, roadWidth / 2);
   const barrierHeight = CAR.height * BARRIER_HEIGHT_FACTOR;
 
   const group = new THREE.Group();
   group.name = 'track-root';
 
-  const { geometry, positions, indices } = buildRoadRibbon(points, tangents, halfWidth);
+  const { geometry, positions, indices } = buildRoadRibbon(points, tangents, halfWidths);
   const roadMesh = new THREE.Mesh(
     geometry,
     new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.95, metalness: 0 }),
@@ -239,7 +269,7 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
   const t0 = tangents[0];
   const p0 = points[0];
   const startLine = new THREE.Mesh(
-    new THREE.BoxGeometry(roadWidth, 0.04, 0.7),
+    new THREE.BoxGeometry(halfWidths[0] * 2, 0.04, 0.7),
     new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.6 }),
   );
   startLine.name = 'start-line';
@@ -250,7 +280,7 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
   const elev = meta.mode === 'complex' ? makeElevation(meta.seed) : null;
   group.add(buildGroundVisual(meta.mode, points, elev));
 
-  const { visual: barrierVisual, bodies: barrierBodies } = buildBarriers(points, tangents, halfWidth, barrierHeight);
+  const { visual: barrierVisual, bodies: barrierBodies } = buildBarriers(points, tangents, halfWidths, barrierHeight);
   for (const b of barrierVisual) group.add(b);
 
   // 物理地面：简单模式用无限平面；复杂模式用路面 Trimesh + 安全兜底平面
@@ -283,6 +313,7 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
     lengths,
     totalLength: total,
     roadWidth,
+    halfWidths,
     barrierHeight,
     group,
     physics: { ground, barriers: barrierBodies },

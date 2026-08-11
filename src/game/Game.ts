@@ -121,8 +121,8 @@ export class Game {
     );
     this.car.group.position.set(start.x, start.y + 0.5, start.z);
     this.car.group.quaternion.copy(startQuat);
-    this.camera.position.copy(start.clone().sub(tangent.clone().multiplyScalar(9)).add(new THREE.Vector3(0, 4.2, 0)));
-    this.camera.lookAt(start.clone().add(tangent.clone().multiplyScalar(5)));
+    this.camera.position.copy(start.clone().sub(tangent.clone().multiplyScalar(8)).add(new THREE.Vector3(0, 3.4, 0)));
+    this.camera.lookAt(start.clone().add(tangent.clone().multiplyScalar(4)));
 
     this.hud = createHUD(container);
     this.hud.onBack(() => opts.onBack());
@@ -271,7 +271,7 @@ export class Game {
     const idx = this.nearestIndex(pos);
     const p = this.track.points[idx];
     const s = this.track.lengths[idx];
-    const halfWidth = this.track.roadWidth / 2;
+    const halfWidth = this.track.halfWidths[idx];
 
     // 脱轨判定（水平距离）
     const dx = pos.x - p.x;
@@ -335,15 +335,15 @@ export class Game {
   private updateCamera(dt: number, state: ReturnType<CarPhysics['getState']>): void {
     const pos = new THREE.Vector3(state.position.x, state.position.y, state.position.z);
     const forward = new THREE.Vector3(state.forward.x, state.forward.y, state.forward.z);
-    // 相机略低，让前轮在视野中可见
-    const desired = pos.clone().sub(forward.clone().multiplyScalar(8.5)).add(new THREE.Vector3(0, 3.15, 0));
+    // 相机更低更近，清晰看到前轮转向状态
+    const desired = pos.clone().sub(forward.clone().multiplyScalar(7.6)).add(new THREE.Vector3(0, 2.65, 0));
     if (this.shake > 0) {
       desired.x += (Math.random() - 0.5) * this.shake;
       desired.y += (Math.random() - 0.5) * this.shake;
       desired.z += (Math.random() - 0.5) * this.shake;
     }
     this.camera.position.lerp(desired, Math.min(1, 5 * dt));
-    this.camera.lookAt(pos.clone().add(forward.clone().multiplyScalar(5)));
+    this.camera.lookAt(pos.clone().add(forward.clone().multiplyScalar(4)));
   }
 
   dispose(): void {

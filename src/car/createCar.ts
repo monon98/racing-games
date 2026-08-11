@@ -16,21 +16,21 @@ export function buildCar(color: string): CarVisual {
   const glassMat = new THREE.MeshStandardMaterial({ color: 0x223344, roughness: 0.15, metalness: 0.6 });
   const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1b1b1b, roughness: 0.9 });
 
-  // 车身底盘
-  const body = new THREE.Mesh(new THREE.BoxGeometry(CAR.width, 0.55, CAR.length), bodyMat);
-  body.position.y = 0.55;
+  // 车身底盘（降低、更流线，让前轮在追尾视角露出）
+  const body = new THREE.Mesh(new THREE.BoxGeometry(CAR.width, 0.42, CAR.length), bodyMat);
+  body.position.y = 0.42;
   body.castShadow = true;
   group.add(body);
 
   // 座舱
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(CAR.width * 0.72, 0.5, CAR.length * 0.5), glassMat);
-  cabin.position.set(0, 1.02, -0.25);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(CAR.width * 0.7, 0.36, CAR.length * 0.5), glassMat);
+  cabin.position.set(0, 0.78, -0.3);
   cabin.castShadow = true;
   group.add(cabin);
 
   // 尾翼
-  const spoiler = new THREE.Mesh(new THREE.BoxGeometry(CAR.width * 0.8, 0.12, 0.35), bodyMat);
-  spoiler.position.set(0, 1.05, -CAR.length / 2 + 0.28);
+  const spoiler = new THREE.Mesh(new THREE.BoxGeometry(CAR.width * 0.8, 0.1, 0.32), bodyMat);
+  spoiler.position.set(0, 0.86, -CAR.length / 2 + 0.3);
   group.add(spoiler);
 
   // 前灯 / 尾灯
@@ -38,10 +38,10 @@ export function buildCar(color: string): CarVisual {
   const tailMat = new THREE.MeshStandardMaterial({ color: 0xaa2222, emissive: 0xaa2222, emissiveIntensity: 0.4 });
   for (const side of [-1, 1]) {
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.14, 0.08), lightMat);
-    head.position.set(side * CAR.width * 0.36, 0.68, CAR.length / 2 + 0.02);
+    head.position.set(side * CAR.width * 0.36, 0.52, CAR.length / 2 + 0.02);
     group.add(head);
     const tail = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.14, 0.08), tailMat);
-    tail.position.set(side * CAR.width * 0.36, 0.68, -CAR.length / 2 - 0.02);
+    tail.position.set(side * CAR.width * 0.36, 0.52, -CAR.length / 2 - 0.02);
     group.add(tail);
   }
 

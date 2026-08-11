@@ -55,7 +55,12 @@ async function main(): Promise<void> {
     const points = generateCenterlinePoints(meta);
     check('centerline 700 points', points.length === 700);
     const built = buildTrack(meta, points);
-    check('roadWidth = 10.0', Math.abs(built.roadWidth - 10.0) < 1e-6, String(built.roadWidth));
+    check('roadWidth = 12.0', Math.abs(built.roadWidth - 12.0) < 1e-6, String(built.roadWidth));
+    check(
+      'curves wider than base',
+      Math.max(...built.halfWidths) > built.roadWidth / 2 + 0.5,
+      `max halfWidth=${Math.max(...built.halfWidths).toFixed(2)}m base=${(built.roadWidth / 2).toFixed(2)}m`,
+    );
     check('barrierHeight = 0.7', Math.abs(built.barrierHeight - 0.7) < 1e-6, String(built.barrierHeight));
     check('totalLength in [250, 1200]', built.totalLength > 250 && built.totalLength < 1200, String(built.totalLength));
     check('has barriers', built.physics.barriers.length > 20, String(built.physics.barriers.length));
@@ -177,7 +182,7 @@ async function main(): Promise<void> {
         maxLateral = Math.max(maxLateral, Math.sqrt(best));
       }
     }
-    const barrierLine = built.roadWidth / 2 + 0.6;
+    const barrierLine = Math.max(...built.halfWidths) + 0.6;
     check('barrier contains car in high-speed turn', maxLateral < barrierLine + 1.2, `max lateral=${maxLateral.toFixed(2)}m`);
     // 急刹防前翻回归：加速到 ~58km/h 后按刹车键 3s，俯仰不得失控（曾因刹车点头前翻）
     physics.reset(
