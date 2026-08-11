@@ -10,7 +10,13 @@
 
 ## 地面物理注意事项
 - cannon-es `Plane` 的默认局部法线是 `(0,0,1)`（竖直面），用作水平地面必须 `body.quaternion.setFromEuler(-Math.PI/2, 0, 0)`，否则车辆直接坠落（曾发生“开局即掉落”bug）。
+- 旋转后的静态地面必须把四元数放进 Body 构造参数并调用 `body.updateAABB()`：不刷新 AABB 时 broadphase 会按旧包围盒剔除部分轮子射线（曾导致前轮永不触地、转向无效）。
 - 复杂模式地面用路面顶点构建 `CANNON.Trimesh`（与视觉完全贴合），另加 y=-30 的水平 Plane 兜底。
+
+## 车辆坐标与手感
+- RaycastVehicle 轴配置：right=X(0)、forward=Z(2)、up=Y(1)；该配置下正发动机力沿 -Z 推，因此代码里油门力取反（正油门 = +Z 前进），`customSlidingRotationalSpeed=30` 保持滑动时轮子转向一致。
+- 底盘 `linearDamping 0.25 / angularDamping 0.3`；松油门且不踩刹车时施加 90N 发动机制动，避免无阻力滑行。
+- 轮子必须作为场景直属子节点并直接应用 `getWheelTransform` 的世界变换（作为车体子节点会双重偏移导致轮子消失）。
 
 ## 检测与重生（src/config.ts 有全部阈值）
 - 翻车：车身上向量与竖直夹角 > 70° 持续 1s → `respawn('flip')`，`flips+1`（仅记录不展示）。

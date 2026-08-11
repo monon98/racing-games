@@ -50,10 +50,11 @@ export function buildCar(color: string): CarVisual {
   wheelGeo.rotateZ(Math.PI / 2);
   const wheels: THREE.Mesh[] = [];
   const wheelPositions: Array<[number, number, number]> = [
-    [-CAR.width / 2 + 0.08, CAR.wheelRadius, CAR.length * 0.37],
-    [CAR.width / 2 - 0.08, CAR.wheelRadius, CAR.length * 0.37],
-    [-CAR.width / 2 + 0.08, CAR.wheelRadius, -CAR.length * 0.37],
-    [CAR.width / 2 - 0.08, CAR.wheelRadius, -CAR.length * 0.37],
+    // 轮距略宽于车身（与物理连接点一致），让前轮在追尾视角下露出
+    [-(CAR.width / 2 + 0.12), CAR.wheelRadius, CAR.length * 0.37],
+    [CAR.width / 2 + 0.12, CAR.wheelRadius, CAR.length * 0.37],
+    [-(CAR.width / 2 + 0.12), CAR.wheelRadius, -CAR.length * 0.37],
+    [CAR.width / 2 + 0.12, CAR.wheelRadius, -CAR.length * 0.37],
   ];
   for (const [x, y, z] of wheelPositions) {
     const wheel = new THREE.Mesh(wheelGeo, wheelMat);

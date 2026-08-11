@@ -84,6 +84,10 @@ export class Game {
     this.scene.add(track.group);
     this.car = buildCar(opts.carColor);
     this.scene.add(this.car.group);
+    // 轮子改为场景直属子节点：物理返回的是世界坐标变换，作为车体子节点会双重偏移（曾导致轮子“消失”）
+    for (const wheel of this.car.wheels) {
+      this.scene.add(wheel);
+    }
 
     this.physics = new CarPhysics();
     this.physics.addGround(track.physics.ground);
@@ -317,7 +321,8 @@ export class Game {
   private updateCamera(dt: number, state: ReturnType<CarPhysics['getState']>): void {
     const pos = new THREE.Vector3(state.position.x, state.position.y, state.position.z);
     const forward = new THREE.Vector3(state.forward.x, state.forward.y, state.forward.z);
-    const desired = pos.clone().sub(forward.clone().multiplyScalar(8.5)).add(new THREE.Vector3(0, 3.6, 0));
+    // 相机略低，让前轮在视野中可见
+    const desired = pos.clone().sub(forward.clone().multiplyScalar(8.5)).add(new THREE.Vector3(0, 3.15, 0));
     this.camera.position.lerp(desired, Math.min(1, 5 * dt));
     this.camera.lookAt(pos.clone().add(forward.clone().multiplyScalar(5)));
   }

@@ -54,7 +54,7 @@ async function main(): Promise<void> {
     const points = generateCenterlinePoints(meta);
     check('centerline 700 points', points.length === 700);
     const built = buildTrack(meta, points);
-    check('roadWidth = 7.0', Math.abs(built.roadWidth - 7.0) < 1e-6, String(built.roadWidth));
+    check('roadWidth = 10.0', Math.abs(built.roadWidth - 10.0) < 1e-6, String(built.roadWidth));
     check('barrierHeight = 0.7', Math.abs(built.barrierHeight - 0.7) < 1e-6, String(built.barrierHeight));
     check('totalLength in [250, 1200]', built.totalLength > 250 && built.totalLength < 1200, String(built.totalLength));
     check('has barriers', built.physics.barriers.length > 20, String(built.physics.barriers.length));
@@ -80,6 +80,41 @@ async function main(): Promise<void> {
     }
     const settled = physics.getState().position.y;
     check('car does not fall through ground', settled > start.y - 1, `settled y=${settled.toFixed(2)}, ground y=${start.y.toFixed(2)}`);
+    const vehicle = (physics as unknown as { vehicle: CANNON.RaycastVehicle }).vehicle;
+    check('all four wheels contact ground', vehicle.numWheelsOnGround === 4, `wheels=${vehicle.numWheelsOnGround}`);
+    // 驾驶回归：踩油门 2 秒应沿切线前进（曾因 RaycastVehicle 坐标轴默认值错误而横向漂移/不动）
+    physics.reset(
+      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    for (let i = 0; i < 30; i++) {
+      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    }
+    const driveStart = physics.getState().position.clone();
+    for (let i = 0; i < 120; i++) {
+      physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+    }
+    const driveEnd = physics.getState().position.clone();
+    const forward = new CANNON.Vec3(tangent.x, 0, tangent.z);
+    const delta = new CANNON.Vec3(driveEnd.x - driveStart.x, 0, driveEnd.z - driveStart.z);
+    const forwardProgress = delta.dot(forward);
+    check('car drives forward on throttle', forwardProgress > 3, `forward progress=${forwardProgress.toFixed(2)}m`);
+    // 转向回归：油门 + 右转 1.5s，航向角应有明显变化（前轮不触地时转向无效）
+    const h0 = Math.atan2(physics.getState().forward.x, physics.getState().forward.z);
+    for (let i = 0; i < 90; i++) {
+      physics.update({ throttle: 0.8, brake: 0, steering: 1 }, 1 / 60);
+    }
+    const h1 = Math.atan2(physics.getState().forward.x, physics.getState().forward.z);
+    let dh = h1 - h0;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    check('steering turns the car', dh > 0.02, `heading change=${dh.toFixed(3)}rad (steering=1 should turn right)`);
+    // 滑行回归：松油门 4s 后速度应明显下降（阻尼 + 发动机制动）
+    for (let i = 0; i < 240; i++) {
+      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    }
+    const coast = physics.getState().absoluteSpeed;
+    check('car decelerates when coasting', coast < 2.5, `coast speed=${coast.toFixed(2)} m/s`);
     physics.dispose();
     const roadAttr = (built.group.getObjectByName('road') as import('three').Mesh)?.geometry.getAttribute('position');
     check('road mesh has positions', !!roadAttr && roadAttr.count === 1400);

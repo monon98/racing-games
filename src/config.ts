@@ -8,8 +8,8 @@ export const CAR = {
   wheelRadius: 0.35,
 } as const;
 
-/** 赛道宽 = 车宽 × 该系数（需求：3~4 个车身，取 3.5） */
-export const ROAD_WIDTH_MULTIPLIER = 3.5;
+/** 赛道宽 = 车宽 × 该系数（原需求 3~4 个车身；用户后续要求加宽，取 5 倍） */
+export const ROAD_WIDTH_MULTIPLIER = 5.0;
 
 /** 护栏高度 = 车高 × 该系数（需求：车高的一半） */
 export const BARRIER_HEIGHT_FACTOR = 0.5;

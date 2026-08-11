@@ -255,18 +255,23 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
   // 物理地面：简单模式用无限平面；复杂模式用路面 Trimesh + 安全兜底平面
   let ground: CANNON.Body;
   if (meta.mode === 'simple') {
-    ground = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
-    // cannon-es Plane 默认法线为 (0,0,1)；绕 X 轴旋转 -90° 使其朝上，否则车会直接坠落
-    ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+    // cannon-es Plane 默认法线为 (0,0,1)；绕 X 轴旋转 -90° 使其朝上。
+    // 必须把四元数放进构造参数并调用 updateAABB()：旋转后不刷新 AABB，
+    // broadphase 会按旧的“竖直面”包围盒剔除车头方向（z>0）的轮子射线，导致前轮永不触地。
+    const planeQuat = new CANNON.Quaternion().setFromEuler(-Math.PI / 2, 0, 0);
+    ground = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), quaternion: planeQuat });
+    ground.updateAABB();
   } else {
     const trimesh = new CANNON.Trimesh(positions, indices);
     ground = new CANNON.Body({ mass: 0, shape: trimesh });
+    const catcherQuat = new CANNON.Quaternion().setFromEuler(-Math.PI / 2, 0, 0);
     const catcher = new CANNON.Body({
       mass: 0,
       shape: new CANNON.Plane(),
       position: new CANNON.Vec3(0, -30, 0),
+      quaternion: catcherQuat,
     });
-    catcher.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+    catcher.updateAABB();
     barrierBodies.push(catcher);
   }
 

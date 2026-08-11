@@ -37,10 +37,19 @@ export class CarPhysics {
     this.chassis = new CANNON.Body({
       mass: 550,
       shape: chassisShape,
-      angularDamping: 0.12,
+      // 线性阻尼模拟空气阻力/滚动阻力，避免松油门后滑行过长
+      linearDamping: 0.25,
+      angularDamping: 0.3,
     });
 
-    this.vehicle = new CANNON.RaycastVehicle({ chassisBody: this.chassis });
+    // y-up 坐标系：right=X(0)、forward=Z(2)、up=Y(1)。
+    // 默认值 (right=Z, forward=X, up=Y) 会让油门/转向偏 90°，车辆无法正常驾驶。
+    this.vehicle = new CANNON.RaycastVehicle({
+      chassisBody: this.chassis,
+      indexRightAxis: 0,
+      indexForwardAxis: 2,
+      indexUpAxis: 1,
+    });
 
     const wheelOptionsBase = {
       radius: CAR.wheelRadius,
@@ -55,12 +64,13 @@ export class CarPhysics {
       rollInfluence: 0.08,
       axleLocal: new CANNON.Vec3(-1, 0, 0),
       useCustomSlidingRotationalSpeed: true,
-      customSlidingRotationalSpeed: -30,
+      customSlidingRotationalSpeed: 30,
     };
 
     const zFront = CAR.length * 0.37;
     const zRear = -CAR.length * 0.37;
-    const xOffset = CAR.width / 2 - 0.06;
+    // 轮距略宽于车身，前轮在追尾视角下可见
+    const xOffset = CAR.width / 2 + 0.12;
     const yOffset = -0.3;
     for (const [x, z] of [
       [-xOffset, zFront],
@@ -88,11 +98,15 @@ export class CarPhysics {
     this.vehicle.setSteeringValue(this.steerCurrent, 0);
     this.vehicle.setSteeringValue(this.steerCurrent, 1);
 
-    const force = input.throttle * ENGINE_FORCE;
+    // RaycastVehicle 在 right=X(0)/forward=Z(2)/up=Y(1) 配置下，
+    // 正发动机力会沿 -Z 推（实测倒车），因此取反：正油门 = 向前(+Z)。
+    const force = -input.throttle * ENGINE_FORCE;
     this.vehicle.applyEngineForce(force, 2);
     this.vehicle.applyEngineForce(force, 3);
 
-    const brake = input.brake * BRAKE_FORCE;
+    // 松油门且不踩刹车时施加“发动机制动”，避免无阻力滑行
+    const engineBrake = input.throttle === 0 && input.brake === 0 ? 90 : 0;
+    const brake = Math.max(input.brake * BRAKE_FORCE, engineBrake);
     this.vehicle.setBrake(brake, 0);
     this.vehicle.setBrake(brake, 1);
     this.vehicle.setBrake(brake, 2);
