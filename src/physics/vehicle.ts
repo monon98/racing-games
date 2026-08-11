@@ -12,16 +12,25 @@ export interface VehicleState {
   quaternion: CANNON.Quaternion;
   forward: CANNON.Vec3;
   up: CANNON.Vec3;
+  velocity: CANNON.Vec3;
+  angularVelocity: CANNON.Vec3;
   forwardSpeed: number;
   absoluteSpeed: number;
 }
 
-const MAX_STEER = 0.55;
-const ENGINE_FORCE = 3200;
-const REVERSE_FORCE_RATIO = 0.5;
+const MAX_STEER = 0.65;
+// 目标：0→100km/h 约 2.5s（配合线性阻尼 0.12，初始加速度约 12.9 m/s²，极速可达 200+km/h）
+const ENGINE_FORCE = 3500;
+const REVERSE_FORCE_RATIO = 0.7;
 const REVERSE_MAX_SPEED = 8; // m/s ≈ 29 km/h
-const BRAKE_FORCE = 70;
-const ENGINE_BRAKE = 60;
+const FORWARD_MAX_SPEED = 200 / 3.6; // 200 km/h
+const BRAKE_FORCE = 55;
+const ENGINE_BRAKE = 35;
+/** 松左右键后轮子回中速度（慢）；按住转向时响应速度（快） */
+const STEER_RETURN_RATE = 3;
+const STEER_APPLY_RATE = 7;
+/** 底盘原点在静止时的离地高度（|连接点y| + 悬架静止长 + 轮半径），重生/出生用 */
+export const CHASSIS_SPAWN_HEIGHT = 1.1;
 
 /** cannon-es 四轮车辆（RaycastVehicle 悬架） */
 export class CarPhysics {
@@ -36,22 +45,25 @@ export class CarPhysics {
   private readonly barrierIds = new Set<number>();
   private readonly onCollide: (event: { body: CANNON.Body; contact: CANNON.ContactEquation }) => void;
   private steerCurrent = 0;
+  private frontAirborneTime = 0;
 
   constructor() {
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.81, 0) });
     this.world.broadphase = new CANNON.SAPBroadphase(this.world);
 
     const chassisShape = new CANNON.Box(
-      // 底盘降低（重心低、离地高），避免刹车点头后底盘触地引发前翻
+      // 底盘收窄（防弯角刮地诱发侧翻）、重心低、离地高
       new CANNON.Vec3(CAR.width / 2 - 0.05, CAR.height * 0.26, CAR.length / 2 - 0.05),
     );
     this.chassis = new CANNON.Body({
       mass: 550,
-      shape: chassisShape,
       // 线性阻尼模拟空气阻力/滚动阻力，避免松油门后滑行过长
-      linearDamping: 0.25,
-      angularDamping: 0.7,
+      // 线性阻尼 0.12：极速可达 200+km/h，松油仍能缓慢减速
+      linearDamping: 0.12,
+      angularDamping: 0.8,
     });
+    // 重心下移 0.10m（碰撞盒下偏），车身也更贴近路面，降低抬头力矩
+    this.chassis.addShape(chassisShape, new CANNON.Vec3(0, -0.1, 0));
 
     // y-up 坐标系：right=X(0)、forward=Z(2)、up=Y(1)。
     // 默认值 (right=Z, forward=X, up=Y) 会让油门/转向偏 90°，车辆无法正常驾驶。
@@ -69,9 +81,9 @@ export class CarPhysics {
       suspensionStiffness: 45,
       suspensionRestLength: 0.38,
       maxSuspensionTravel: 0.25,
-      frictionSlip: 2.1,
+      frictionSlip: 3.2,
       dampingRelaxation: 4.0,
-      dampingCompression: 9.5,
+      dampingCompression: 11,
       maxSuspensionForce: 200000,
       rollInfluence: 0.08,
       axleLocal: new CANNON.Vec3(-1, 0, 0),
@@ -82,7 +94,7 @@ export class CarPhysics {
     const zFront = CAR.length * 0.37;
     const zRear = -CAR.length * 0.37;
     // 轮距略宽于车身，前轮在追尾视角下可见
-    const xOffset = CAR.width / 2 + 0.12;
+    const xOffset = CAR.width / 2 + 0.15;
     const yOffset = -0.24;
     for (const [x, z] of [
       [-xOffset, zFront],
@@ -118,7 +130,26 @@ export class CarPhysics {
 
   update(input: VehicleInput, dt: number): void {
     const targetSteer = input.steering * MAX_STEER;
-    this.steerCurrent += (targetSteer - this.steerCurrent) * Math.min(1, 6 * dt);
+    // 按住转向时快速打到目标角；松键后缓慢回中
+    const steerRate = targetSteer !== 0 ? STEER_APPLY_RATE : STEER_RETURN_RATE;
+    this.steerCurrent += (targetSteer - this.steerCurrent) * Math.min(1, steerRate * dt);
+
+    // 侧滑抑制：无转向输入时，衰减垂直于车头的速度分量（松开左右键后迅速回正行驶方向）
+    if (Math.abs(input.steering) < 0.05) {
+      const speed = this.chassis.velocity.length();
+      if (speed > 2) {
+        const fwd = new CANNON.Vec3(0, 0, 1);
+        this.chassis.quaternion.vmult(fwd, fwd);
+        const fwdComp = this.chassis.velocity.dot(fwd);
+        const lateral = this.chassis.velocity.clone().vsub(fwd.clone().scale(fwdComp));
+        lateral.y = 0; // 只抑制水平侧滑，不动垂直速度（避免干扰悬架）
+        if (lateral.length() > 0.05) {
+          this.chassis.velocity.vsub(lateral.scale(Math.min(1, 4 * dt)), this.chassis.velocity);
+        }
+      }
+    }
+
+    // 直线稳定辅助：无转向输入时把车头逐步对齐到速度方向，减少松开转向后的侧滑
 
     this.vehicle.setSteeringValue(this.steerCurrent, 0);
     this.vehicle.setSteeringValue(this.steerCurrent, 1);
@@ -126,13 +157,28 @@ export class CarPhysics {
     // RaycastVehicle 在 right=X(0)/forward=Z(2)/up=Y(1) 配置下，
     // 正发动机力会沿 -Z 推（实测倒车），因此取反：正油门 = 向前(+Z)。
     let force = -input.throttle * ENGINE_FORCE;
-    if (input.throttle < 0) {
+    if (input.throttle > 0) {
+      // 前进限速 200km/h：接近上限时渐入削减动力，避免惯性超调（在 0.98×上限处完全切断）
+      const fwdSpeed = this.forwardSpeed();
+      if (fwdSpeed >= FORWARD_MAX_SPEED * 0.85) {
+        const taper = Math.max(0, 1 - (fwdSpeed - FORWARD_MAX_SPEED * 0.85) / (FORWARD_MAX_SPEED * 0.13));
+        force *= taper;
+      }
+      // 防抬头后翻：前轮持续离地（wheelie）150ms 后才把动力降到 0.35 倍（允许短促抬头，不牺牲起步加速）
+      const frontInContact =
+        this.vehicle.wheelInfos[0].isInContact && this.vehicle.wheelInfos[1].isInContact;
+      if (frontInContact) {
+        this.frontAirborneTime = 0;
+      } else {
+        this.frontAirborneTime += dt;
+      }
+      if (this.frontAirborneTime > 0.15) {
+        force *= 0.35;
+      }
+    } else if (input.throttle < 0) {
       // 倒车限制：更小的加速力 + 最高倒车速度
       force = -input.throttle * ENGINE_FORCE * REVERSE_FORCE_RATIO;
-      const fwd = new CANNON.Vec3(0, 0, 1);
-      this.chassis.quaternion.vmult(fwd, fwd);
-      const forwardSpeed = this.chassis.velocity.dot(fwd);
-      if (forwardSpeed < -REVERSE_MAX_SPEED) {
+      if (this.forwardSpeed() < -REVERSE_MAX_SPEED) {
         force = 0;
       }
     }
@@ -161,6 +207,8 @@ export class CarPhysics {
       quaternion: this.chassis.quaternion,
       forward,
       up,
+      velocity: this.chassis.velocity,
+      angularVelocity: this.chassis.angularVelocity,
       forwardSpeed,
       absoluteSpeed: this.chassis.velocity.length(),
     };
@@ -179,6 +227,16 @@ export class CarPhysics {
   getWheelTransform(index: number): CANNON.Transform {
     this.vehicle.updateWheelTransform(index);
     return this.vehicle.wheelInfos[index].worldTransform;
+  }
+
+  getSteering(): number {
+    return this.steerCurrent;
+  }
+
+  private forwardSpeed(): number {
+    const fwd = new CANNON.Vec3(0, 0, 1);
+    this.chassis.quaternion.vmult(fwd, fwd);
+    return this.chassis.velocity.dot(fwd);
   }
 
   dispose(): void {

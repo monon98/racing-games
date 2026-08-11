@@ -9,7 +9,7 @@ import {
   OFFTRACK_MARGIN,
   TIME_PENALTY_MS,
 } from '../config';
-import { CarPhysics, type VehicleInput } from '../physics/vehicle';
+import { CarPhysics, CHASSIS_SPAWN_HEIGHT, type VehicleInput } from '../physics/vehicle';
 import { addLeaderboardEntry } from '../storage/db';
 import type { BuiltTrack } from '../track/generator';
 import { createHUD, type HudRefs } from '../ui/hud';
@@ -116,10 +116,10 @@ export class Game {
     tangent.normalize();
     const startQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), tangent);
     this.physics.reset(
-      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
       new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
     );
-    this.car.group.position.set(start.x, start.y + 0.5, start.z);
+    this.car.group.position.set(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z);
     this.car.group.quaternion.copy(startQuat);
     this.camera.position.copy(start.clone().sub(tangent.clone().multiplyScalar(8)).add(new THREE.Vector3(0, 3.4, 0)));
     this.camera.lookAt(start.clone().add(tangent.clone().multiplyScalar(4)));
@@ -257,7 +257,7 @@ export class Game {
     tangent.normalize();
     const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), tangent);
     this.physics.reset(
-      new CANNON.Vec3(p.x, p.y + 0.5, p.z),
+      new CANNON.Vec3(p.x, p.y + CHASSIS_SPAWN_HEIGHT, p.z),
       new CANNON.Quaternion(quat.x, quat.y, quat.z, quat.w),
     );
     this.lastS = respawnS;

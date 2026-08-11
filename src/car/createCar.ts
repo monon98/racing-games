@@ -16,21 +16,22 @@ export function buildCar(color: string): CarVisual {
   const glassMat = new THREE.MeshStandardMaterial({ color: 0x223344, roughness: 0.15, metalness: 0.6 });
   const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1b1b1b, roughness: 0.9 });
 
-  // 车身底盘（降低、更流线，让前轮在追尾视角露出）
-  const body = new THREE.Mesh(new THREE.BoxGeometry(CAR.width, 0.42, CAR.length), bodyMat);
-  body.position.y = 0.42;
+  // 车身底盘：放在轮顶高度附近（物理原点在悬架之上，若按 0.4+ 放置会悬浮在半空）
+  // 轮心局部 y ≈ -0.24-0.38，轮顶 ≈ 该值+轮半径；车身底部略高于轮顶
+  const body = new THREE.Mesh(new THREE.BoxGeometry(CAR.width, 0.4, CAR.length), bodyMat);
+  body.position.y = 0.04;
   body.castShadow = true;
   group.add(body);
 
-  // 座舱
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(CAR.width * 0.7, 0.36, CAR.length * 0.5), glassMat);
-  cabin.position.set(0, 0.78, -0.3);
+  // 座舱（车身中间的方块）
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(CAR.width * 0.7, 0.3, CAR.length * 0.5), glassMat);
+  cabin.position.set(0, 0.4, -0.3);
   cabin.castShadow = true;
   group.add(cabin);
 
   // 尾翼
   const spoiler = new THREE.Mesh(new THREE.BoxGeometry(CAR.width * 0.8, 0.1, 0.32), bodyMat);
-  spoiler.position.set(0, 0.86, -CAR.length / 2 + 0.3);
+  spoiler.position.set(0, 0.44, -CAR.length / 2 + 0.3);
   group.add(spoiler);
 
   // 前灯 / 尾灯
@@ -38,23 +39,23 @@ export function buildCar(color: string): CarVisual {
   const tailMat = new THREE.MeshStandardMaterial({ color: 0xaa2222, emissive: 0xaa2222, emissiveIntensity: 0.4 });
   for (const side of [-1, 1]) {
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.14, 0.08), lightMat);
-    head.position.set(side * CAR.width * 0.36, 0.52, CAR.length / 2 + 0.02);
+    head.position.set(side * CAR.width * 0.36, 0.12, CAR.length / 2 + 0.02);
     group.add(head);
     const tail = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.14, 0.08), tailMat);
-    tail.position.set(side * CAR.width * 0.36, 0.52, -CAR.length / 2 - 0.02);
+    tail.position.set(side * CAR.width * 0.36, 0.12, -CAR.length / 2 - 0.02);
     group.add(tail);
   }
 
-  // 四个轮子：圆柱体转 Z 轴使轴线沿 X
-  const wheelGeo = new THREE.CylinderGeometry(CAR.wheelRadius, CAR.wheelRadius, 0.34, 20);
+  // 四个轮子：圆柱体转 Z 轴使轴线沿 X；放大到半径 0.45、胎宽 0.42
+  const wheelGeo = new THREE.CylinderGeometry(CAR.wheelRadius, CAR.wheelRadius, 0.42, 24);
   wheelGeo.rotateZ(Math.PI / 2);
   const wheels: THREE.Mesh[] = [];
   const wheelPositions: Array<[number, number, number]> = [
     // 轮距略宽于车身（与物理连接点一致），让前轮在追尾视角下露出
-    [-(CAR.width / 2 + 0.12), CAR.wheelRadius, CAR.length * 0.37],
-    [CAR.width / 2 + 0.12, CAR.wheelRadius, CAR.length * 0.37],
-    [-(CAR.width / 2 + 0.12), CAR.wheelRadius, -CAR.length * 0.37],
-    [CAR.width / 2 + 0.12, CAR.wheelRadius, -CAR.length * 0.37],
+    [-(CAR.width / 2 + 0.15), CAR.wheelRadius, CAR.length * 0.37],
+    [CAR.width / 2 + 0.15, CAR.wheelRadius, CAR.length * 0.37],
+    [-(CAR.width / 2 + 0.15), CAR.wheelRadius, -CAR.length * 0.37],
+    [CAR.width / 2 + 0.15, CAR.wheelRadius, -CAR.length * 0.37],
   ];
   for (const [x, y, z] of wheelPositions) {
     const wheel = new THREE.Mesh(wheelGeo, wheelMat);

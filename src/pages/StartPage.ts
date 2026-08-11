@@ -4,6 +4,8 @@ import { getLeaderboard, loadActiveTrack, replaceActiveTrack } from '../storage/
 import { loadSettings, saveCarColor, savePlayerName, saveTrackMode } from '../storage/settings';
 import { buildTrack, generateCenterlinePoints } from '../track/generator';
 import { downloadBlob, exportTrackToBlob, importTrackFromFile } from '../track/gltf';
+import type { BuiltTrack } from '../track/generator';
+import { TrackPreview } from '../ui/TrackPreview';
 import type { TrackMode, TrackPackage } from '../types';
 import { fmtTime } from '../utils/format';
 import { randomSeed } from '../utils/random';
@@ -15,6 +17,8 @@ const MODE_LABEL: Record<TrackMode, string> = {
 
 export function mountStartPage(root: HTMLElement): () => void {
   root.innerHTML = `
+    <div id="preview-background" class="preview-background"></div>
+    <div class="page-overlay"></div>
     <div class="page start-page">
       <header class="start-header">
         <h1>极速赛道 Racing</h1>
@@ -69,8 +73,11 @@ export function mountStartPage(root: HTMLElement): () => void {
   const leaderboardEl = root.querySelector<HTMLElement>('#leaderboard')!;
   const toastEl = root.querySelector<HTMLElement>('#toast')!;
   const fileInput = root.querySelector<HTMLInputElement>('#file-import')!;
+  const previewContainer = root.querySelector<HTMLElement>('#preview-background')!;
 
   let current: TrackPackage | null = null;
+  let currentBuilt: BuiltTrack | null = null;
+  let preview: TrackPreview | null = null;
   let toastTimer = 0;
 
   function toast(msg: string): void {
@@ -104,8 +111,23 @@ export function mountStartPage(root: HTMLElement): () => void {
       current = await createNewTrack(loadSettings().trackMode);
       await replaceActiveTrack(current);
     }
+    currentBuilt = buildTrack(current.meta, current.centerline.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
+    ensurePreview();
     renderTrackInfo();
     await renderLeaderboard();
+  }
+
+  function ensurePreview(): void {
+    if (!currentBuilt) return;
+    if (preview) {
+      preview.setTrack(currentBuilt);
+    } else {
+      try {
+        preview = new TrackPreview(previewContainer, currentBuilt, loadSettings().carColor);
+      } catch {
+        previewContainer.innerHTML = '<p class="empty">当前环境不支持 WebGL 预览</p>';
+      }
+    }
   }
 
   function renderTrackInfo(): void {
@@ -159,6 +181,8 @@ export function mountStartPage(root: HTMLElement): () => void {
     const pkg = await createNewTrack(mode);
     await replaceActiveTrack(pkg);
     current = pkg;
+    currentBuilt = buildTrack(pkg.meta, pkg.centerline.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
+    ensurePreview();
     renderTrackInfo();
     await renderLeaderboard();
     toast('已重新生成赛道，排行榜已清除');
@@ -171,7 +195,10 @@ export function mountStartPage(root: HTMLElement): () => void {
     modeSelect.value = settings.trackMode;
 
     nameInput.addEventListener('change', () => savePlayerName(nameInput.value.trim()));
-    colorInput.addEventListener('input', () => saveCarColor(colorInput.value));
+    colorInput.addEventListener('input', () => {
+      saveCarColor(colorInput.value);
+      preview?.setColor(colorInput.value);
+    });
     modeSelect.addEventListener('change', () => saveTrackMode(modeSelect.value as TrackMode));
 
     document.querySelector('#btn-start')!.addEventListener('click', () => {
@@ -212,6 +239,8 @@ export function mountStartPage(root: HTMLElement): () => void {
           const pkg = await importTrackFromFile(file);
           await replaceActiveTrack(pkg);
           current = pkg;
+          currentBuilt = buildTrack(pkg.meta, pkg.centerline.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
+          ensurePreview();
           renderTrackInfo();
           await renderLeaderboard();
           toast('赛道导入成功，排行榜已清除');
@@ -226,6 +255,8 @@ export function mountStartPage(root: HTMLElement): () => void {
   init();
 
   return () => {
+    preview?.dispose();
+    preview = null;
     root.innerHTML = '';
   };
 }

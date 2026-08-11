@@ -3,9 +3,9 @@ import * as fs from 'node:fs';
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { TRACK_VERSION } from '../src/config';
+import { CAR, TRACK_VERSION } from '../src/config';
 import { updateLapProgress } from '../src/game/lapProgress';
-import { CarPhysics } from '../src/physics/vehicle';
+import { CarPhysics, CHASSIS_SPAWN_HEIGHT } from '../src/physics/vehicle';
 import { buildTrack, generateCenterlinePoints } from '../src/track/generator';
 import { exportTrackToBlob, extractTrackUserData, TRACK_ASSET_TYPE } from '../src/track/gltf';
 import type { TrackMeta } from '../src/types';
@@ -54,6 +54,7 @@ async function main(): Promise<void> {
     const meta = makeMeta(mode, 42);
     const points = generateCenterlinePoints(meta);
     check('centerline 700 points', points.length === 700);
+    check('wheelRadius = 0.45', CAR.wheelRadius === 0.45, String(CAR.wheelRadius));
     const built = buildTrack(meta, points);
     check('roadWidth = 12.0', Math.abs(built.roadWidth - 12.0) < 1e-6, String(built.roadWidth));
     check(
@@ -61,7 +62,7 @@ async function main(): Promise<void> {
       Math.max(...built.halfWidths) > built.roadWidth / 2 + 0.5,
       `max halfWidth=${Math.max(...built.halfWidths).toFixed(2)}m base=${(built.roadWidth / 2).toFixed(2)}m`,
     );
-    check('barrierHeight = 0.7', Math.abs(built.barrierHeight - 0.7) < 1e-6, String(built.barrierHeight));
+    check('barrierHeight = 1.05', Math.abs(built.barrierHeight - 1.05) < 1e-6, String(built.barrierHeight));
     check('totalLength in [250, 1200]', built.totalLength > 250 && built.totalLength < 1200, String(built.totalLength));
     check('has barriers', built.physics.barriers.length > 20, String(built.physics.barriers.length));
     // 物理坠落回归：车应在 2 秒内停在路面上而不是掉下去
@@ -88,6 +89,23 @@ async function main(): Promise<void> {
     check('car does not fall through ground', settled > start.y - 1, `settled y=${settled.toFixed(2)}, ground y=${start.y.toFixed(2)}`);
     const vehicle = (physics as unknown as { vehicle: CANNON.RaycastVehicle }).vehicle;
     check('all four wheels contact ground', vehicle.numWheelsOnGround === 4, `wheels=${vehicle.numWheelsOnGround}`);
+    // 复活稳定性回归：以正确离地高度重生并按住前进 3s，不应弹跳或翻车
+    const respawnPhysics = new CarPhysics();
+    respawnPhysics.addGround(built.physics.ground);
+    respawnPhysics.reset(
+      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    let minUpRespawn = 1;
+    let maxHeight = 0;
+    for (let i = 0; i < 180; i++) {
+      respawnPhysics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+      const st = respawnPhysics.getState();
+      minUpRespawn = Math.min(minUpRespawn, st.up.y);
+      maxHeight = Math.max(maxHeight, st.position.y - start.y);
+    }
+    check('respawn no bounce/flip with throttle', minUpRespawn > 0.6 && maxHeight < 2.0, `min up.y=${minUpRespawn.toFixed(3)} maxHeight=${maxHeight.toFixed(2)}m`);
+    respawnPhysics.dispose();
     // 驾驶回归：踩油门 2 秒应沿切线前进（曾因 RaycastVehicle 坐标轴默认值错误而横向漂移/不动）
     physics.reset(
       new CANNON.Vec3(start.x, start.y + 0.5, start.z),
@@ -105,6 +123,26 @@ async function main(): Promise<void> {
     const delta = new CANNON.Vec3(driveEnd.x - driveStart.x, 0, driveEnd.z - driveStart.z);
     const forwardProgress = delta.dot(forward);
     check('car drives forward on throttle', forwardProgress > 3, `forward progress=${forwardProgress.toFixed(2)}m`);
+    // 0-100km/h 加速回归（仅平路赛道，复杂赛道有坡度不属于调校目标）
+    if (mode === 'simple') {
+      const accelPhysics = new CarPhysics();
+      accelPhysics.addGround(built.physics.ground);
+      accelPhysics.reset(
+        new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
+        new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+      );
+      for (let i = 0; i < 30; i++) accelPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      let accelSteps = 0;
+      for (let i = 0; i < 600; i++) {
+        accelPhysics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+        if (accelPhysics.getState().absoluteSpeed >= 27.78) {
+          accelSteps = i + 1;
+          break;
+        }
+      }
+      check('0-100km/h in ~2.5s', accelSteps > 120 && accelSteps < 210, `time=${(accelSteps / 60).toFixed(1)}s`);
+      accelPhysics.dispose();
+    }
     // 转向回归：油门 + steering=1（左转键）1.5s，航向角应有明显变化（前轮不触地时转向无效）
     const h0 = Math.atan2(physics.getState().forward.x, physics.getState().forward.z);
     for (let i = 0; i < 90; i++) {
@@ -115,6 +153,23 @@ async function main(): Promise<void> {
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
     check('steering turns the car', dh > 0.02, `heading change=${dh.toFixed(3)}rad (steering=1 = left)`);
+    // 满舵稳定性回归：高速满舵 1.5s，车身不得震动/侧翻
+    physics.reset(
+      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    for (let i = 0; i < 30; i++) {
+      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    }
+    for (let i = 0; i < 90; i++) {
+      physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+    }
+    let minUpFullLock = 1;
+    for (let i = 0; i < 90; i++) {
+      physics.update({ throttle: 0.7, brake: 0, steering: 1 }, 1 / 60);
+      minUpFullLock = Math.min(minUpFullLock, physics.getState().up.y);
+    }
+    check('stable at full lock', minUpFullLock > 0.8, `min up.y=${minUpFullLock.toFixed(3)}`);
     // 滑行回归：松油门 4s 后速度应明显下降（阻尼 + 发动机制动）
     for (let i = 0; i < 240; i++) {
       physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
@@ -155,12 +210,30 @@ async function main(): Promise<void> {
       physics.update({ throttle: -1, brake: 0, steering: 0 }, 1 / 60);
     }
     const reverse1s = -physics.getState().forwardSpeed;
-    check('reverse acceleration limited', reverse1s < 7, `reverse speed after 1s=${reverse1s.toFixed(2)} m/s`);
+    check('reverse acceleration boosted', reverse1s > 4 && reverse1s < 8.8, `reverse speed after 1s=${reverse1s.toFixed(2)} m/s`);
     for (let i = 0; i < 120; i++) {
       physics.update({ throttle: -1, brake: 0, steering: 0 }, 1 / 60);
     }
     const reverseTop = -physics.getState().forwardSpeed;
-    check('reverse top speed limited', reverseTop < 8.5, `reverse top speed=${reverseTop.toFixed(2)} m/s`);
+    check('reverse top speed limited', reverseTop < 8.8, `reverse top speed=${reverseTop.toFixed(2)} m/s`);
+    // 平路 12s 全油门后应在 144~202km/h（发动机限速 200；下坡可超速，故只在平路断言）
+    if (mode === 'simple') {
+      const speedPhysics = new CarPhysics();
+      speedPhysics.addGround(built.physics.ground);
+      speedPhysics.reset(
+        new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+        new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+      );
+      for (let i = 0; i < 30; i++) {
+        speedPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      }
+      for (let i = 0; i < 720; i++) {
+        speedPhysics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+      }
+      const topSpeed = speedPhysics.getState().absoluteSpeed;
+      check('flat-road top speed 144~202km/h', topSpeed > 40 && topSpeed < 56.2, `top=${(topSpeed * 3.6).toFixed(0)}km/h`);
+      speedPhysics.dispose();
+    }
     // 护栏防穿透回归：高速右转 2s，车不能穿出护栏外（曾因薄护栏+穿透导致弯道脱轨无碰撞）
     physics.reset(
       new CANNON.Vec3(start.x, start.y + 0.5, start.z),
@@ -201,6 +274,36 @@ async function main(): Promise<void> {
       minUpBrake = Math.min(minUpBrake, physics.getState().up.y);
     }
     check('no forward flip when braking at speed', minUpBrake > 0.6, `min up.y=${minUpBrake.toFixed(3)}`);
+    // 快速左右切换不侧翻回归：100km/h 下每 0.13s 换向 3s
+    const switchPhysics = new CarPhysics();
+    switchPhysics.addGround(built.physics.ground);
+    switchPhysics.reset(
+      new CANNON.Vec3(start.x, start.y + 0.5, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    for (let i = 0; i < 30; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    for (let i = 0; i < 240; i++) switchPhysics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+    let minUpSwitch = 1;
+    for (let i = 0; i < 180; i++) {
+      const steering = Math.floor(i / 8) % 2 === 0 ? 1 : -1;
+      switchPhysics.update({ throttle: 0.7, brake: 0, steering }, 1 / 60);
+      minUpSwitch = Math.min(minUpSwitch, switchPhysics.getState().up.y);
+    }
+    check('no rollover on rapid steering switch', minUpSwitch > 0.5, `min up.y=${minUpSwitch.toFixed(3)}`);
+    // 松键缓慢回中回归：满舵后松开，0.15s 时仍在回中过程，0.6s 内基本归零
+    for (let i = 0; i < 30; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 1 }, 1 / 60);
+    switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    const steerAfterRelease = Math.abs(switchPhysics.getSteering());
+    for (let i = 0; i < 8; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    const steerAt015s = Math.abs(switchPhysics.getSteering());
+    for (let i = 0; i < 64; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    const steerAt12s = Math.abs(switchPhysics.getSteering());
+    check(
+      'steering returns slowly to center',
+      steerAt015s > 0.2 && steerAt12s < 0.05,
+      `at0.15s=${steerAt015s.toFixed(2)} at1.2s=${steerAt12s.toFixed(2)} (release=${steerAfterRelease.toFixed(2)})`,
+    );
+    switchPhysics.dispose();
     physics.dispose();
     const roadAttr = (built.group.getObjectByName('road') as import('three').Mesh)?.geometry.getAttribute('position');
     check('road mesh has positions', !!roadAttr && roadAttr.count === 1400);

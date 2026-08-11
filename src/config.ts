@@ -5,7 +5,7 @@ export const CAR = {
   width: 2.0,
   height: 1.4,
   length: 4.2,
-  wheelRadius: 0.35,
+  wheelRadius: 0.45,
 } as const;
 
 /** 赛道基础宽 = 车宽 × 该系数（原需求 3~4 个车身；用户后续要求加宽，先 5 倍再 6 倍） */
@@ -17,8 +17,8 @@ export const CURVE_WIDEN_STRENGTH = 16;
 /** 弯道加宽最大比例（最急弯处基础宽的 1+该值 倍） */
 export const CURVE_WIDEN_MAX = 0.4;
 
-/** 护栏高度 = 车高 × 该系数（需求：车高的一半） */
-export const BARRIER_HEIGHT_FACTOR = 0.5;
+/** 护栏高度 = 车高 × 该系数（原需求一半；用户后续要求调高，取 0.75） */
+export const BARRIER_HEIGHT_FACTOR = 0.75;
 
 export const BARRIER_THICKNESS = 0.55;
 

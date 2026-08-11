@@ -185,33 +185,45 @@ function buildBarriers(
   const visual: THREE.Mesh[] = [];
   const bodies: CANNON.Body[] = [];
   const material = new THREE.MeshStandardMaterial({ color: 0xcf4b4b, roughness: 0.8 });
+  const n = points.length;
 
   for (let i = 0; i < points.length; i += BARRIER_STEP) {
-    const p = points[i];
-    const t = tangents[i];
-    const right = new THREE.Vector3(t.z, 0, -t.x).normalize();
-    const next = points[(i + BARRIER_STEP) % points.length];
-    // 段长放大 1.4 倍让相邻护栏重叠，消除弯道外侧的楔形缝隙
-    const segLen = Math.max(0.4, p.distanceTo(next) * 1.4);
-    const offset = halfWidths[i] + BARRIER_THICKNESS / 2 + 0.08;
-    const yaw = Math.atan2(t.x, t.z);
-    const halfExtents = new CANNON.Vec3(BARRIER_THICKNESS / 2, barrierHeight / 2, segLen / 2);
+    const j = (i + BARRIER_STEP) % n;
+    // 护栏段两端各取“该采样点的实际路面边缘”，与加宽后的路面精确对齐
+    const rightI = new THREE.Vector3(tangents[i].z, 0, -tangents[i].x).normalize();
+    const rightJ = new THREE.Vector3(tangents[j].z, 0, -tangents[j].x).normalize();
+    const offsetI = halfWidths[i] + BARRIER_THICKNESS / 2 + 0.08;
+    const offsetJ = halfWidths[j] + BARRIER_THICKNESS / 2 + 0.08;
 
     for (const side of [-1, 1]) {
-      const center = new THREE.Vector3(
-        p.x + right.x * offset * side,
-        p.y + barrierHeight / 2,
-        p.z + right.z * offset * side,
+      const eI = new THREE.Vector3(
+        points[i].x + rightI.x * offsetI * side,
+        points[i].y,
+        points[i].z + rightI.z * offsetI * side,
       );
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(BARRIER_THICKNESS, barrierHeight, segLen), material);
-      mesh.position.copy(center);
+      const eJ = new THREE.Vector3(
+        points[j].x + rightJ.x * offsetJ * side,
+        points[j].y,
+        points[j].z + rightJ.z * offsetJ * side,
+      );
+      const mid = eI.clone().add(eJ).multiplyScalar(0.5);
+      const dir = eJ.clone().sub(eI);
+      // 段长放大 1.15 倍让相邻护栏重叠，消除弯道外侧的楔形缝隙
+      const len = Math.max(0.4, dir.length() * 1.15);
+      const yaw = Math.atan2(dir.x, dir.z);
+
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(BARRIER_THICKNESS, barrierHeight, len), material);
+      mesh.position.set(mid.x, mid.y + barrierHeight / 2, mid.z);
       mesh.rotation.y = yaw;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       visual.push(mesh);
 
-      const body = new CANNON.Body({ mass: 0, shape: new CANNON.Box(halfExtents) });
-      body.position.set(center.x, center.y, center.z);
+      const body = new CANNON.Body({
+        mass: 0,
+        shape: new CANNON.Box(new CANNON.Vec3(BARRIER_THICKNESS / 2, barrierHeight / 2, len / 2)),
+      });
+      body.position.set(mid.x, mid.y + barrierHeight / 2, mid.z);
       body.quaternion.setFromEuler(0, yaw, 0);
       bodies.push(body);
     }

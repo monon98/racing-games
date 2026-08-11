@@ -30,7 +30,8 @@ export function drawMinimap(
     (H - pad * 2) / Math.max(1, maxZ - minZ),
   );
   const toScreen = (x: number, z: number): [number, number] => [
-    pad + (x - minX) * scale,
+    // X 轴镜像：3D 追尾视角里 +X 在屏幕左侧，小地图必须一致，否则左右转向看起来相反
+    pad + (maxX - x) * scale,
     pad + (maxZ - z) * scale,
   ];
 
@@ -88,7 +89,7 @@ export function drawMinimap(
   ctx.stroke();
 
   // 车头朝向
-  const dirX = Math.sin(heading) * 12;
+  const dirX = -Math.sin(heading) * 12;
   const dirY = -Math.cos(heading) * 12;
   ctx.beginPath();
   ctx.moveTo(cx, cy);
