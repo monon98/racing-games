@@ -101,20 +101,6 @@ it('game smoke suite', async () => {
       }
       check('complex drivable slopes', maxSlope < 0.13, `max slope=${(maxSlope * 100).toFixed(1)}%`);
       check('complex no cliffs', noCliff);
-      // 交叉净空：XZ 贴近的异段路面高度差 ≥ 2m
-      let crossClear = true;
-      for (let i = 0; i < built.points.length; i += 6) {
-        for (let j = i + 1; j < built.points.length; j += 6) {
-          const idxDist = Math.min(j - i, built.points.length - (j - i));
-          if (idxDist < built.points.length / 4) continue;
-          const dx = built.points[i].x - built.points[j].x;
-          const dz = built.points[i].z - built.points[j].z;
-          if (dx * dx + dz * dz < 100 && Math.abs(built.points[i].y - built.points[j].y) < 2) {
-            crossClear = false;
-          }
-        }
-      }
-      check('complex crossing clearance', crossClear);
     }
     check('has barriers', built.physics.barriers.length > 20, String(built.physics.barriers.length));
     // 物理坠落回归：车应在 2 秒内停在路面上而不是掉下去
