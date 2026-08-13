@@ -251,9 +251,10 @@ export class CarPhysics {
     this.vehicle.applyEngineForce(force, 2);
     this.vehicle.applyEngineForce(force, 3);
 
-    // 松油门且不踩刹车时施加制动：无转向只缓慢滑行；按住左右键则快速降速
+    // 松油门且不踩刹车时施加制动：无转向只缓慢滑行；按住左右键或正在倒车则快速降速
+    const reversing = this.forwardSpeed() < -0.5;
     const engineBrake = input.throttle === 0 && input.brake === 0
-      ? (Math.abs(input.steering) > 0.05 ? ENGINE_BRAKE : COAST_BRAKE)
+      ? (Math.abs(input.steering) > 0.05 || reversing ? ENGINE_BRAKE : COAST_BRAKE)
       : 0;
     // 转向限速（50km/h）：除削减动力外，超速时对四轮施加制动，避免低阻尼下无法降速
     let brake = Math.max(input.brake * BRAKE_FORCE, engineBrake);

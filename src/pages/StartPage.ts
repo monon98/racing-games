@@ -36,10 +36,7 @@ export function mountStartPage(root: HTMLElement): () => void {
             <span>汽车颜色</span>
             <input id="car-color" type="color" />
           </label>
-          <div class="start-actions">
-            <button id="btn-start" class="btn btn-primary">开始游戏</button>
-            <button id="btn-preview" class="btn">赛道 / 赛车预览</button>
-          </div>
+          <button id="btn-start" class="btn btn-primary">开始游戏</button>
         </section>
 
         <section class="panel">
@@ -54,6 +51,7 @@ export function mountStartPage(root: HTMLElement): () => void {
           </label>
           <div class="track-actions">
             <button id="btn-regenerate" class="btn">重新生成赛道</button>
+            <button id="btn-preview" class="btn">赛道 / 赛车预览</button>
             <button id="btn-export" class="btn">导出赛道</button>
             <button id="btn-import" class="btn">导入赛道</button>
             <input id="file-import" type="file" accept=".glb,.gltf" hidden />

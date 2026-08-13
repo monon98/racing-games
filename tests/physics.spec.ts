@@ -193,6 +193,19 @@ describe('vehicle physics', () => {
     rig.physics.dispose();
   });
 
+  it('simple: releasing reverse stops quickly (unlike forward coasting)', () => {
+    const built = buildTrackForMode('simple');
+    const rig = createCarRig(built);
+    for (let i = 0; i < 30; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    for (let i = 0; i < 90; i++) rig.physics.update({ throttle: -1, brake: 0, steering: 0 }, 1 / 60);
+    const reverseBefore = -rig.physics.getState().forwardSpeed;
+    check('reverse reached speed before release', reverseBefore > 2, `reverse=${reverseBefore.toFixed(2)} m/s`);
+    for (let i = 0; i < 90; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    const afterRelease = rig.physics.getState().forwardSpeed;
+    check('reverse release stops quickly', afterRelease > -1.0, `after release=${afterRelease.toFixed(2)} m/s`);
+    rig.physics.dispose();
+  });
+
   it('simple: flat-road top speed 144~202km/h', () => {
     const built = buildTrackForMode('simple');
     const rig = createCarRig(built);

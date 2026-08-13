@@ -586,7 +586,8 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
     new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.6 }),
   );
   startLine.name = 'start-line';
-  startLine.position.set(p0.x, p0.y + 0.05, p0.z);
+  // 抬高到路面（复杂模式贴地路面 +0.05）之上，避免与路面共面导致起始线显示不完整
+  startLine.position.set(p0.x, p0.y + 0.12, p0.z);
   startLine.rotation.y = Math.atan2(t0.x, t0.z);
   group.add(startLine);
 

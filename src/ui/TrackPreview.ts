@@ -142,11 +142,24 @@ export class TrackPreview {
       this.radius = 26;
       this.height = 16;
     }
-    this.camera.position.set(
-      this.center.x + Math.sin(this.angle) * this.radius,
-      this.center.y + this.height,
-      this.center.z + Math.cos(this.angle) * this.radius,
-    );
+    if (this.freeCamera && this.viewMode === 'car') {
+      // 自由镜头下从车头方向观察赛车，避免初始视角看到车尾（“倒着”）
+      const t = this.track.tangents[0];
+      const fwd = new THREE.Vector3(t.x, 0, t.z);
+      if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, 1);
+      else fwd.normalize();
+      this.camera.position.set(
+        this.center.x + fwd.x * this.radius,
+        this.center.y + this.height,
+        this.center.z + fwd.z * this.radius,
+      );
+    } else {
+      this.camera.position.set(
+        this.center.x + Math.sin(this.angle) * this.radius,
+        this.center.y + this.height,
+        this.center.z + Math.cos(this.angle) * this.radius,
+      );
+    }
     this.camera.lookAt(this.center.clone().add(new THREE.Vector3(0, 1, 0)));
   }
 
