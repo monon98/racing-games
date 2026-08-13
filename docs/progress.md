@@ -4,16 +4,16 @@
 
 ## 已完成
 - [x] 需求梳理（`docs/requirements.md`，10 条原始需求映射 + 补充规则）
-- [x] 技术栈分析与决策（`docs/tech-stack.md`：Vite 8 + TS 7 strict + three + cannon-es + idb + pnpm）
+- [x] 技术栈分析与决策（`docs/tech-stack.md`：Vite 8 + TS 7 strict + three + cannon-es + 原生 IndexedDB + pnpm）
 - [x] M0 规范与工程
   - [x] git 初始化；pnpm 固化（`packageManager` + `.npmrc`）
   - [x] `AGENTS.md` 项目规则
   - [x] 项目技能 `.agents/skills/racing-game-dev/`（SKILL.md + 3 份 references + agents/openai.yaml，`quick_validate.py` 通过）
   - [x] docs 四件套（requirements / tech-stack / roadmap / progress）
 - [x] M1 最小可玩版（全部功能项，见 `docs/roadmap.md`）
-- [x] M2 复杂赛道（分形噪声起伏 + 路面 Trimesh 物理）
+- [x] M2 复杂赛道（地形优先：2D 高度图地形 + 2D 闭环轨道 + 整片地形 Trimesh 物理）
 - [x] 对话决策记录文档 `docs/discussion-log.md`（后续决策/问题/修改方式持续追加）
-- [x] Bug 修复：开局即掉落（Plane 默认法线为竖直面，已旋转为水平）；`pnpm smoke` 新增“车辆不下坠”回归断言
+- [x] Bug 修复：开局即掉落（Plane 默认法线为竖直面，已旋转为水平）；vitest 新增“车辆不下坠”回归断言
 - [x] Bug 修复：轮子消失（轮子改场景直属 + 物理世界变换）、前轮不触地导致转向无效（静态地面旋转后补 `updateAABB()`）、倒车（油门力取反）、滑行过长（阻尼 + 发动机制动）
 - [x] 赛道加宽至 5 倍车宽（10m）；轮距外扩 + 相机降低使前轮在视野中可见
 - [x] 赛车模型优化（车身降低、更流线，相机 2.65m/7.6m 清晰看到前轮转向）；赛道再加宽至 6 倍车宽（12m）且弯道按曲率最多加宽 40%
@@ -44,7 +44,7 @@
 - [x] 护栏加宽加高（0.8m / 1.54m），底盘与车身同宽 + 四轮碰撞盒，整车纳入碰撞判定
 - [x] 测试拆分：track/physics/gltf/rules 四个 spec + helpers，新增 `pnpm test:*` 针对性运行
 - [x] 复杂赛道道路不再露绿：贴地路面抬高 0.05m
-- [x] 复杂赛道起伏增强：地形 0~14m + 双山丘 + 坡度 10%，空中 3.2g 下压力抑制飞车
+- [x] 复杂赛道起伏增强：地形 0~14m + 双山丘 + 坡度 10%（空中方案后续改为纯重力下落，见下条）
 - [x] 赛道/赛车自由镜头预览页（`#/preview`，OrbitControls），首页添加入口
 - [x] 飞车纯重力下落：移除人工下压力/部分离地钳制，仅四轮全离地限 2m/s 防极端弹射
 - [x] 默认玩家名：玩家 + 5 位随机字母数字（空名/无存档自动生成）
@@ -56,10 +56,10 @@
 - [x] “赛道 / 赛车预览”按钮移到“当前赛道”面板（背景预览保持全屏）
 - [x] 陡坡爬坡修复：防抬头俯仰改为相对地面法线，后轮不再离地/后溜/翻车 + 爬坡回归测试
 - [x] 预览轮子贴地：静态预览把轮子放到地面高度，不再“四轮朝天”
-- [x] 工程验证：`pnpm typecheck`、`pnpm build`、`pnpm smoke`（Node 冒烟：赛道生成/物理/GLB 往返）全部通过
+- [x] 工程验证：`pnpm typecheck`、`pnpm test`（vitest：赛道生成/物理/GLB 往返/规则）、`pnpm build` 全部通过
 
 ## 未完成 / 待办
-- [ ] 已知问题处理（见 `docs/known-issues.md`：高速碰撞判断、环境碰撞、多车道脱轨判定等）
+- [ ] 已知问题处理（见 `docs/known-issues.md`：高速碰撞判断、环境无碰撞、野地短暂离地、碰撞盒近似）
 - [ ] 浏览器人工验收（本机运行 `pnpm dev` 后按清单逐项确认）：
   - [ ] 启动页各控件与排行榜展示
   - [ ] 完整跑一圈冲线 → 排行榜写入
@@ -69,7 +69,9 @@
   - [ ] 翻车/脱轨重生与 +3s、距离惩罚显示
   - [ ] 空格暂停/恢复、返回首页按钮
   - [ ] 小地图与车辆位置一致
-- [ ] M3 打磨与可选：音效与光影、多文件 `.gltf+.bin` 导入、vitest/代码分割（基础环境装饰已完成）
+- [ ] M3 打磨与可选：音效与光影、多文件 `.gltf+.bin` 导入、代码分割（环境装饰与 vitest 已完成）
+- [ ] 轨道生成：继续优化/扩展（布局多样性、可玩性等）
+- [ ] 录像回放：录制驾驶过程，支持回放
 
 ## 环境备注
 - PowerShell 下 `npm.ps1` 被执行策略禁用；pnpm 写入 `AppData\Local\pnpm` 全局配置目录需授权执行。

@@ -1,13 +1,13 @@
 # 存储与 GLTF（storage-and-gltf）
 
-## IndexedDB（idb，`src/storage/db.ts`）
+## IndexedDB（原生封装，`src/storage/db.ts`）
 - 库 `racing-game` v1，两个 store：`tracks`（keyPath `key`，活动赛道 key=`active`）、`leaderboard`（keyPath `trackId`，值为 `{trackId, entries[]}`）。
 - `TrackPackage = { meta, centerline: Point3[], glb: Blob | null }`；单活动赛道约束。
 - `replaceActiveTrack`：覆盖活动赛道并删除旧 trackId 的排行榜（重新生成/导入即清榜）。
 - `addLeaderboardEntry`：按 `lapTimeMs` 升序、截取前 10。
 
 ## localStorage（`src/storage/settings.ts`）
-- 玩家名 `racing.playerName`、颜色 `racing.carColor`、模式 `racing.trackMode`（默认 simple）。
+- 玩家名 `racing.playerName`（默认“玩家 + 5 位随机字母数字”）、颜色 `racing.carColor`、模式 `racing.trackMode`（默认 simple）。
 
 ## GLTF/GLB 往返（`src/track/gltf.ts`）
 - 导出：`GLTFExporter.parseAsync(group, { binary: true })`；赛道数据写入 `group.userData`（type=`racing-game-track`、meta、roadWidth、barrierHeight、centerline），GLTFExporter 会序列化到 extras，GLTFLoader 会还原到 `scene.userData`。
