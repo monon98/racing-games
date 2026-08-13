@@ -1,5 +1,4 @@
-﻿/* 一次性 Node 冒烟测试：验证赛道生成、物理构建、GLB 往返（不依赖浏览器） */
-import * as fs from 'node:fs';
+import { expect, it } from 'vitest';
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -10,7 +9,6 @@ import { buildTrack, findSafeSpawnIndex, generateCenterlinePoints, loopSelfInter
 import { exportTrackToBlob, extractTrackUserData, TRACK_ASSET_TYPE } from '../src/track/gltf';
 import type { TrackMeta } from '../src/types';
 
-let failures = 0;
 
 if (typeof (globalThis as { FileReader?: unknown }).FileReader === 'undefined') {
   // GLTFExporter 二进制导出依赖 FileReader；Node 24 无全局实现，提供最小 polyfill
@@ -36,19 +34,14 @@ if (typeof (globalThis as { FileReader?: unknown }).FileReader === 'undefined') 
 }
 
 function check(name: string, cond: boolean, detail = ''): void {
-  if (cond) {
-    console.log(`  [ok] ${name}`);
-  } else {
-    failures += 1;
-    console.error(`  [FAIL] ${name} ${detail}`);
-  }
+  expect(cond, `${name} ${detail}`).toBe(true);
 }
 
 function makeMeta(mode: 'simple' | 'complex', seed: number): TrackMeta {
   return { id: `smoke-${mode}-${seed}`, mode, seed, createdAt: Date.now(), version: TRACK_VERSION };
 }
 
-async function main(): Promise<void> {
+it('game smoke suite', async () => {
   for (const mode of ['simple', 'complex'] as const) {
     console.log(`--- ${mode} track ---`);
     const meta = makeMeta(mode, 42);
@@ -450,7 +443,6 @@ async function main(): Promise<void> {
   const built = buildTrack(meta, generateCenterlinePoints(meta));
   const blob = await exportTrackToBlob(built);
   const buf = Buffer.from(await blob.arrayBuffer());
-  fs.writeFileSync(new URL('./out-smoke.glb', import.meta.url), buf);
   check('GLB size > 100KB', buf.length > 100_000, `${buf.length} bytes`);
 
   const loader = new GLTFLoader();
@@ -482,8 +474,4 @@ async function main(): Promise<void> {
   const back = updateLapProgress(300, 400, L, 600);
   check('backward no progress', !back.crossedLine && back.dS < 0 && Math.abs(back.completedDistance - 600) < 1e-6, JSON.stringify(back));
 
-  console.log(failures === 0 ? '\nSMOKE PASS' : `\nSMOKE FAIL (${failures})`);
-  process.exitCode = failures === 0 ? 0 : 1;
-}
-
-void main();
+});

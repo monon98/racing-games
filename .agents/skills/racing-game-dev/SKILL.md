@@ -33,6 +33,6 @@ description: 'Implementation guidelines for the three.js racing game in the repo
 
 ## Validation
 
-- `pnpm typecheck` 通过。
+- `pnpm typecheck` 通过；`pnpm test`（vitest）通过。
 - `pnpm build` 通过。
 - 按 `docs/progress.md` 的人工验收清单做浏览器验证（持久化、清榜、GLB 往返、重生惩罚、暂停/返回、小地图）。

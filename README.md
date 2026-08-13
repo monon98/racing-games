@@ -23,7 +23,7 @@ Vite 8 · TypeScript 7（strict）· three.js · cannon-es · idb · pnpm
 pnpm install
 pnpm dev        # 开发服务器
 pnpm typecheck  # 类型检查
-pnpm smoke      # Node 冒烟测试（赛道生成/物理/GLB 往返，约 50 项断言）
+pnpm test       # vitest 测试（赛道生成/物理/GLB 往返，约 50 项断言）
 pnpm build      # 生产构建到 dist/
 pnpm preview    # 预览生产构建
 ```
@@ -67,7 +67,7 @@ src/
   game/         游戏主循环、单圈进度
 docs/           需求梳理 / 技术栈 / 路线图 / 进度 / 决策记录
 .agents/skills/racing-game-dev/   项目技能（agent 协作规范）
-smoke/          Node 冒烟测试
+tests/          vitest 测试套件
 ```
 
 ## 部署到 GitHub Pages

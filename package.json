@@ -9,16 +9,17 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "smoke": "vite build --ssr smoke/smoke.ts --outDir .tmp-smoke --emptyOutDir --logLevel warn && node .tmp-smoke/smoke.js"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "cannon-es": "^0.20.0",
-    "idb": "^8.0.3",
     "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/three": "^0.185.4",
     "typescript": "^7.0.2",
-    "vite": "^8.2.1"
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
   }
 }

@@ -5,7 +5,7 @@
 
 ## 包管理
 - 一律使用 `pnpm`（本机 PowerShell 下 `npm.ps1` 被执行策略禁用；pnpm 写入全局配置目录需授权执行）。
-- 常用命令：`pnpm dev`、`pnpm typecheck`、`pnpm build`、`pnpm preview`。
+- 常用命令：`pnpm dev`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm preview`。
 
 ## 技术约束
 - TypeScript `strict` 模式；公共数据优先定义类型（见 `src/types.ts`）。

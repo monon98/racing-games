@@ -120,6 +120,10 @@
 - 格子数按“目标长度 − 发卡弯弧长”解析计算，缩放系数 ≈1，坡度不受缩放影响。
 - 交叉净空保证：任何 XZ 贴近的异段路面高度差 ≥2m（隆起 3m、40 点宽、坡度 ≈9%），车能通过且相机不被遮挡。
 - 冒烟新增：complex drivable slopes（<13%）、complex no cliffs、complex crossing clearance、多种子有效性；护栏防穿透与快速切换等改为平路调校项。
+
+## 2026-08-14 测试迁移 vitest / 移除 idb
+- 用 **vitest** 替代 `smoke/` 脚本：原冒烟断言迁移到 `tests/game.spec.ts`（`pnpm test`，约 24s 通过）。
+- 移除 **idb** 依赖：`src/storage/db.ts` 改用原生 IndexedDB 包装（`indexedDB.open` + Promise 封装，行为不变）。
 - M3 范围：环境装饰（树/石头）、音效与光影、多文件 `.gltf+.bin` 导入、vitest/代码分割（见 `docs/roadmap.md`）。
 - 驾驶手感调优参数（发动机力、悬架、转向）集中在 `src/physics/vehicle.ts` 顶部常量，改手感先动那里。
 - 浏览器人工验收清单（持久化、清榜、GLB 往返、重生惩罚、暂停/返回、小地图）见 `docs/progress.md`。

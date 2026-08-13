@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 
 export default defineConfig({
@@ -7,5 +8,10 @@ export default defineConfig({
     : './',
   server: {
     host: true,
+  },
+  test: {
+    include: ['tests/**/*.spec.ts'],
+    testTimeout: 240_000,
+    hookTimeout: 240_000,
   },
 });
