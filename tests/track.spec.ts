@@ -1,5 +1,6 @@
 import { describe, it } from 'vitest';
 import * as CANNON from 'cannon-es';
+import * as THREE from 'three';
 import { CAR } from '../src/config';
 import { buildTrack, findSafeSpawnIndex, generateCenterlinePoints, loopSelfIntersects } from '../src/track/generator';
 import { buildTrackForMode, check, makeMeta } from './helpers';
@@ -74,6 +75,18 @@ describe('track generation', () => {
         maxDev = Math.max(maxDev, Math.abs(p.y - built.terrain.sample(p.x, p.z)));
       }
       check('track follows terrain', maxDev < 1.0, `maxDev=${maxDev.toFixed(2)}m`);
+      // 轮距处左右等高（轮胎接地）：侧坡过大时刚性车身 + 有限悬架会让单侧轮胎离地，
+      // 导致坡上失去驱动力、后溜翻车；地形走廊找平后应保持左右一致
+      let maxWheelDiff = 0;
+      for (let i = 0; i < points.length; i += 3) {
+        const p = points[i];
+        const t = built.tangents[i];
+        const right = new THREE.Vector3(t.z, 0, -t.x).normalize();
+        const l = built.terrain.sample(p.x - right.x * 1.15, p.z - right.z * 1.15);
+        const r = built.terrain.sample(p.x + right.x * 1.15, p.z + right.z * 1.15);
+        maxWheelDiff = Math.max(maxWheelDiff, Math.abs(l - r));
+      }
+      check('wheel track is level on slopes', maxWheelDiff < 0.15, `max=${maxWheelDiff.toFixed(3)}m`);
       const groundMesh = built.group.getObjectByName('ground') as import('three').Mesh;
       const attr = groundMesh?.geometry.getAttribute('position');
       if (attr) {

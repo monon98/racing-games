@@ -126,6 +126,7 @@ const TERRAIN_MARGIN = 60; // 赛道包围盒外扩（m）
 const TERRAIN_MAX_HEIGHT = 14; // 地形高度范围 0~14m（加强高低起伏感）
 const TERRAIN_MAX_DIFF = 1.0; // 相邻地形格最大高差（≈10% 坡度，降低野地/对角坡的飞车）
 const ROAD_TERRAIN_OFFSET = 0.05; // 贴地路面略抬高，避免被地形遮挡（绿色露出）
+const TERRAIN_FLATTEN_HALF = 12; // 道路走廊找平半宽（m）：保证路面左右等高，轮胎始终接地
 
 export interface TerrainData {
   originX: number;
@@ -252,6 +253,44 @@ export function generateTerrain(loop: THREE.Vector3[], seed: number): TerrainDat
     const h11 = heights[r1][c1];
     return (h00 * (1 - tc) + h01 * tc) * (1 - tr) + (h10 * (1 - tc) + h11 * tc) * tr;
   };
+
+  // 道路走廊找平：把中心线两侧（约 24m 宽）的地形压成“最近中心线点的高度”，
+  // 消除侧向坡度——刚性车身 + 有限悬架行程在侧坡上会导致一侧轮胎离地、失去驱动力，
+  // 表现为坡上无法前进、后溜甚至翻车。
+  const roadHeights = loop.map((p) => sample(p.x, p.z));
+  const flattenHalfSq = TERRAIN_FLATTEN_HALF * TERRAIN_FLATTEN_HALF;
+  const n = loop.length;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const wx = originX + c * TERRAIN_CELL;
+      const wz = originZ + r * TERRAIN_CELL;
+      let bestD2 = Infinity;
+      let bestH = 0;
+      for (let i = 0; i < n; i++) {
+        const a = loop[i];
+        const b = loop[(i + 1) % n];
+        const abx = b.x - a.x;
+        const abz = b.z - a.z;
+        const len2 = abx * abx + abz * abz;
+        let t = len2 > 0 ? ((wx - a.x) * abx + (wz - a.z) * abz) / len2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        const px = a.x + abx * t;
+        const pz = a.z + abz * t;
+        const dx = wx - px;
+        const dz = wz - pz;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          const h0 = roadHeights[i];
+          const h1 = roadHeights[(i + 1) % n];
+          bestH = h0 + (h1 - h0) * t;
+        }
+      }
+      if (bestD2 <= flattenHalfSq) {
+        heights[r][c] = bestH;
+      }
+    }
+  }
 
   return { originX, originZ, cell: TERRAIN_CELL, rows, cols, heights, sample };
 }
