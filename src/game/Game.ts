@@ -8,6 +8,7 @@ import {
   OFFTRACK_HOLD_MS,
   OFFTRACK_MARGIN,
   TIME_PENALTY_MS,
+  WRONG_WAY_HOLD_MS,
 } from '../config';
 import { CarPhysics, CHASSIS_SPAWN_HEIGHT, type VehicleInput } from '../physics/vehicle';
 import { addLeaderboardEntry } from '../storage/db';
@@ -15,6 +16,7 @@ import { findSafeSpawnIndex, type BuiltTrack } from '../track/generator';
 import { createHUD, type HudRefs } from '../ui/hud';
 import { drawMinimap } from '../ui/minimap';
 import { updateLapProgress } from './lapProgress';
+import { isWrongWay } from './wrongWay';
 
 export interface GameOptions {
   playerName: string;
@@ -316,17 +318,15 @@ export class Game {
       return;
     }
 
-    // 逆行检测：沿赛道反方向行驶（切线反向速度 > 2 m/s）持续 3s → 警告并重生
+    // 逆行检测：只有“车头朝后且沿车头方向前进”才算逆行；倒车不受影响，持续 3s → 警告并重生
     const tangent = this.track.tangents[idx];
-    const tLen = Math.hypot(tangent.x, tangent.z) || 1;
-    const wrongSpeed = -(state.velocity.x * (tangent.x / tLen) + state.velocity.z * (tangent.z / tLen));
-    if (wrongSpeed > 2) {
+    if (isWrongWay(state.forward, tangent, state.forwardSpeed)) {
       this.wrongWayTime += dtMs;
     } else {
       this.wrongWayTime = 0;
     }
     this.hud.showWrongWay(this.wrongWayTime > 0);
-    if (this.wrongWayTime > 3000) {
+    if (this.wrongWayTime > WRONG_WAY_HOLD_MS) {
       this.wrongWayTime = 0;
       this.respawn('wrongway');
       return;

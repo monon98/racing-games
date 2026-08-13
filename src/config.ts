@@ -40,6 +40,15 @@ export const OFFTRACK_MARGIN = 0.5;
 /** 脱轨持续判定时间（ms） */
 export const OFFTRACK_HOLD_MS = 400;
 
+/** 逆行判定：车头与切线方向点积小于该值视为“车头朝后” */
+export const WRONG_WAY_HEADING_DOT = -0.5;
+
+/** 逆行判定：车头朝后且沿车头方向前进速度（m/s）超过该值才触发（倒车不受影响） */
+export const WRONG_WAY_SPEED = 2;
+
+/** 逆行持续判定时间（ms） */
+export const WRONG_WAY_HOLD_MS = 3000;
+
 export const LEADERBOARD_SIZE = 10;
 
 export const DEFAULT_PLAYER_NAME = '玩家';

@@ -24,10 +24,14 @@ const MAX_STEER = 0.8;
 const ENGINE_FORCE = 7500;
 const REVERSE_FORCE_RATIO = 0.65;
 const REVERSE_MAX_SPEED = 8; // m/s ≈ 29 km/h
+/** 倒车+转向时最高倒车速度：10 km/h ≈ 2.78 m/s */
+const REVERSE_TURN_MAX_SPEED = 10 / 3.6;
 const FORWARD_MAX_SPEED = 200 / 3.6; // 200 km/h
 const TURN_MAX_SPEED = 50 / 3.6; // 转向时最高时速 50 km/h
 const BRAKE_FORCE = 55;
 const ENGINE_BRAKE = 50;
+/** 单纯松油门（无转向）的滑行制动，缓慢减速；带转向时用 ENGINE_BRAKE 快速降速 */
+const COAST_BRAKE = 4;
 /** 空中上升速度上限（m/s），限制上坡/过顶时的飞起幅度（约 0.6m 高） */
 const MAX_AIR_UPWARD_SPEED = 3.5;
 /** 松左右键后轮子回中速度（慢）；按住转向时响应速度（快） */
@@ -66,7 +70,7 @@ export class CarPhysics {
       mass: 750,
       // 线性阻尼模拟空气阻力/滚动阻力，避免松油门后滑行过长
       // 线性阻尼 0.12：极速可达 200+km/h，松油仍能缓慢减速
-      linearDamping: 0.12,
+      linearDamping: 0.05,
       angularDamping: 1.0,
     });
     // 重心下移 0.10m（碰撞盒下偏），车身也更贴近路面，降低抬头力矩
@@ -222,7 +226,8 @@ export class CarPhysics {
     } else if (input.throttle < 0) {
       // 倒车限制：更小的加速力 + 最高倒车速度
       force = -input.throttle * ENGINE_FORCE * REVERSE_FORCE_RATIO;
-      if (this.forwardSpeed() < -REVERSE_MAX_SPEED) {
+      const reverseMax = Math.abs(input.steering) > 0.05 ? REVERSE_TURN_MAX_SPEED : REVERSE_MAX_SPEED;
+      if (this.forwardSpeed() < -reverseMax) {
         force = 0;
       }
     }
@@ -230,9 +235,19 @@ export class CarPhysics {
     this.vehicle.applyEngineForce(force, 2);
     this.vehicle.applyEngineForce(force, 3);
 
-    // 松油门且不踩刹车时施加“发动机制动”，避免无阻力滑行
-    const engineBrake = input.throttle === 0 && input.brake === 0 ? ENGINE_BRAKE : 0;
-    const brake = Math.max(input.brake * BRAKE_FORCE, engineBrake);
+    // 松油门且不踩刹车时施加制动：无转向只缓慢滑行；按住左右键则快速降速
+    const engineBrake = input.throttle === 0 && input.brake === 0
+      ? (Math.abs(input.steering) > 0.05 ? ENGINE_BRAKE : COAST_BRAKE)
+      : 0;
+    // 转向限速（50km/h）：除削减动力外，超速时对四轮施加制动，避免低阻尼下无法降速
+    let brake = Math.max(input.brake * BRAKE_FORCE, engineBrake);
+    if (input.throttle > 0 && Math.abs(input.steering) > 0.05) {
+      const fwdSpeed = this.forwardSpeed();
+      if (fwdSpeed > TURN_MAX_SPEED * 0.9) {
+        const over = Math.min(1, (fwdSpeed - TURN_MAX_SPEED * 0.9) / (TURN_MAX_SPEED * 0.1));
+        brake = Math.max(brake, BRAKE_FORCE * over);
+      }
+    }
     this.vehicle.setBrake(brake, 0);
     this.vehicle.setBrake(brake, 1);
     this.vehicle.setBrake(brake, 2);

@@ -7,6 +7,7 @@ import { updateLapProgress } from '../src/game/lapProgress';
 import { CarPhysics, CHASSIS_SPAWN_HEIGHT } from '../src/physics/vehicle';
 import { buildTrack, findSafeSpawnIndex, generateCenterlinePoints, loopSelfIntersects } from '../src/track/generator';
 import { exportTrackToBlob, extractTrackUserData, TRACK_ASSET_TYPE } from '../src/track/gltf';
+import { isWrongWay } from '../src/game/wrongWay';
 import type { TrackMeta } from '../src/types';
 
 
@@ -244,12 +245,29 @@ it('game smoke suite', async () => {
     for (let i = 0; i < 30; i++) driftPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
     check('drift clears after releasing steering', !driftPhysics.getDrifting());
     driftPhysics.dispose();
-    // 滑行回归：松油门 4s 后速度应明显下降（阻尼 + 发动机制动）
-    for (let i = 0; i < 240; i++) {
-      physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    // 滑行回归（仅平路）：单纯松油门应缓慢滑行（4s 后仍保有较高速度）；
+    // 松油门但按住转向应快速降速（避免侧滑/失控）
+    if (mode === 'simple') {
+      const coastPhysics = new CarPhysics();
+      coastPhysics.addGround(built.physics.ground);
+      const coastReset = (): void => {
+        coastPhysics.reset(
+          new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
+          new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+        );
+        for (let i = 0; i < 30; i++) coastPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+        for (let i = 0; i < 120; i++) coastPhysics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+      };
+      coastReset();
+      for (let i = 0; i < 240; i++) coastPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      const plainCoast = coastPhysics.getState().absoluteSpeed;
+      check('plain coast is slow', plainCoast > 20, `after 4s=${(plainCoast * 3.6).toFixed(0)}km/h`);
+      coastReset();
+      for (let i = 0; i < 240; i++) coastPhysics.update({ throttle: 0, brake: 0, steering: 1 }, 1 / 60);
+      const steerCoast = coastPhysics.getState().absoluteSpeed;
+      check('coast with steering decelerates fast', steerCoast < 5, `after 4s=${(steerCoast * 3.6).toFixed(0)}km/h`);
+      coastPhysics.dispose();
     }
-    const coast = physics.getState().absoluteSpeed;
-    check('car decelerates when coasting', coast < 10, `coast speed=${coast.toFixed(2)} m/s`);
     // 高速防前翻回归（仅平路）：全油门 2s 再松油 4s，车身俯仰不得失控。
     // 复杂赛道的高架短坡在高速下会弹飞车辆，属真实物理，不在此断言范围。
     if (mode === 'simple') {
@@ -296,6 +314,18 @@ it('game smoke suite', async () => {
       const reverseTop = -reversePhysics.getState().forwardSpeed;
       check('reverse top speed limited', reverseTop < 8.8, `reverse top speed=${reverseTop.toFixed(2)} m/s`);
       reversePhysics.dispose();
+      // 倒车 + 转向：最高倒车速度应被限制在 10km/h 附近（≤3.2m/s）
+      const reverseTurnPhysics = new CarPhysics();
+      reverseTurnPhysics.addGround(built.physics.ground);
+      reverseTurnPhysics.reset(
+        new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
+        new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+      );
+      for (let i = 0; i < 30; i++) reverseTurnPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      for (let i = 0; i < 180; i++) reverseTurnPhysics.update({ throttle: -1, brake: 0, steering: 1 }, 1 / 60);
+      const reverseTurnSpeed = -reverseTurnPhysics.getState().forwardSpeed;
+      check('reverse with steering capped low', reverseTurnSpeed < 3.2, `reverse+turn=${(reverseTurnSpeed * 3.6).toFixed(1)}km/h`);
+      reverseTurnPhysics.dispose();
     }
     // 平路 12s 全油门后应在 144~202km/h（发动机限速 200；下坡可超速，故只在平路断言）
     if (mode === 'simple') {
@@ -474,4 +504,13 @@ it('game smoke suite', async () => {
   const back = updateLapProgress(300, 400, L, 600);
   check('backward no progress', !back.crossedLine && back.dS < 0 && Math.abs(back.completedDistance - 600) < 1e-6, JSON.stringify(back));
 
+  console.log('--- wrong-way detection ---');
+  const fwd = { x: 0, y: 0, z: 1 };
+  const bwd = { x: 0, y: 0, z: -1 };
+  const tangent = { x: 0, y: 0, z: 1 };
+  check('nose forward driving is not wrong-way', !isWrongWay(fwd, tangent, 5));
+  check('nose forward reversing is not wrong-way', !isWrongWay(fwd, tangent, -5));
+  check('nose backward driving forward is wrong-way', isWrongWay(bwd, tangent, 5));
+  check('nose backward reversing is not wrong-way', !isWrongWay(bwd, tangent, -5));
+  check('nose backward too slow is not wrong-way', !isWrongWay(bwd, tangent, 1));
 });
