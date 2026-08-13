@@ -32,8 +32,8 @@ const BRAKE_FORCE = 55;
 const ENGINE_BRAKE = 50;
 /** 单纯松油门（无转向）的滑行制动，缓慢减速；带转向时用 ENGINE_BRAKE 快速降速 */
 const COAST_BRAKE = 4;
-/** 空中上升速度上限（m/s），限制上坡/过顶时的飞起幅度（约 0.6m 高） */
-const MAX_AIR_UPWARD_SPEED = 3.5;
+/** 空中上升速度上限（m/s），限制上坡/过顶时的飞起幅度（约 0.1m 高） */
+const MAX_AIR_UPWARD_SPEED = 1.5;
 /** 松左右键后轮子回中速度（慢）；按住转向时响应速度（快） */
 const STEER_RETURN_RATE = 3;
 const STEER_APPLY_RATE = 7;
@@ -260,7 +260,7 @@ export class CarPhysics {
     for (const w of this.vehicle.wheelInfos) {
       if (w.isInContact) wheelsOnGround++;
     }
-    if (wheelsOnGround === 0 && this.chassis.velocity.y > MAX_AIR_UPWARD_SPEED) {
+    if (wheelsOnGround < 4 && this.chassis.velocity.y > MAX_AIR_UPWARD_SPEED) {
       this.chassis.velocity.y = MAX_AIR_UPWARD_SPEED;
     }
   }

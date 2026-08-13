@@ -29,6 +29,8 @@ export interface BuiltTrack {
   };
   /** 路面几何数据（用于物理 Trimesh 与 GLB 导出） */
   roadGeometry: { positions: number[]; indices: number[] };
+  /** 复杂赛道的地形高度场（简单赛道为 null） */
+  terrain: TerrainData | null;
 }
 
 const SAMPLE_SPACING = 1.2;
@@ -74,10 +76,8 @@ export function loopSelfIntersects(points: THREE.Vector3[]): boolean {
   return false;
 }
 
-/** 简单赛道：随机控制点 + Catmull-Rom 闭环（不要求直线；光滑、不突左突右；自交则换种子重试） */
-function generateSimpleTrack(meta: TrackMeta): THREE.Vector3[] {
-  const rng = mulberry32(meta.seed);
-  const targetLength = 1600 + rng() * 1000; // 1600~2600m 随机
+/** 随机星形闭环（XZ 平面）：随机控制点 + Catmull-Rom；光滑、不突左突右、不自交 */
+function generateStarLoop(rng: () => number, targetLength: number): THREE.Vector3[] {
   for (let attempt = 0; attempt < 10; attempt++) {
     const count = 8 + Math.floor(rng() * 4);
     const base = 80 + rng() * 30;
@@ -114,148 +114,159 @@ function generateSimpleTrack(meta: TrackMeta): THREE.Vector3[] {
   return scaleLoop(pts, targetLength);
 }
 
-/** 随机二维高度矩阵（平滑随机场，高度 0~6m） */
-function generateHeightMap(rows: number, cols: number, rng: () => number): number[][] {
-  const h: number[][] = [];
+/** 简单赛道：随机控制点 + Catmull-Rom 闭环（不要求直线；光滑、不突左突右；自交则换种子重试） */
+function generateSimpleTrack(meta: TrackMeta): THREE.Vector3[] {
+  const rng = mulberry32(meta.seed);
+  const targetLength = 1600 + rng() * 1000; // 1600~2600m 随机
+  return generateStarLoop(rng, targetLength);
+}
+
+const TERRAIN_CELL = 10; // 地形网格格距（m）
+const TERRAIN_MARGIN = 60; // 赛道包围盒外扩（m）
+const TERRAIN_MAX_HEIGHT = 8; // 地形高度范围 0~8m
+const TERRAIN_MAX_DIFF = 1.2; // 相邻地形格最大高差（≈12% 坡度）
+
+export interface TerrainData {
+  originX: number;
+  originZ: number;
+  cell: number;
+  rows: number;
+  cols: number;
+  heights: number[][];
+  /** 双线性采样任意点高度（x/z 为世界坐标） */
+  sample(x: number, z: number): number;
+}
+
+function smoothstep(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
+/** 地形优先：用 2D 高度矩阵生成覆盖赛道的平滑地形（值噪声 + 平滑插值 + 坡度钳制），
+ * 并强制一个“山丘”保证复杂赛道必然有可行驶的升降；不处理交叉轨道。 */
+export function generateTerrain(loop: THREE.Vector3[], seed: number): TerrainData {
+  const rng = mulberry32(seed ^ 0x9e3779b9);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const p of loop) {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minZ = Math.min(minZ, p.z);
+    maxZ = Math.max(maxZ, p.z);
+  }
+  const originX = minX - TERRAIN_MARGIN;
+  const originZ = minZ - TERRAIN_MARGIN;
+  const width = maxX - minX + TERRAIN_MARGIN * 2;
+  const depth = maxZ - minZ + TERRAIN_MARGIN * 2;
+  const cols = Math.max(24, Math.ceil(width / TERRAIN_CELL) + 1);
+  const rows = Math.max(24, Math.ceil(depth / TERRAIN_CELL) + 1);
+
+  // 粗控制网格（值噪声），再平滑插值到细网格
+  const gRows = Math.max(4, Math.round(rows / 7));
+  const gCols = Math.max(4, Math.round(cols / 7));
+  const grid: number[][] = [];
+  for (let r = 0; r < gRows; r++) {
+    const row: number[] = [];
+    for (let c = 0; c < gCols; c++) row.push(rng() * TERRAIN_MAX_HEIGHT);
+    grid.push(row);
+  }
+  const sampleGrid = (gr: number, gc: number): number => {
+    const r0 = Math.min(gRows - 1, Math.max(0, Math.floor(gr)));
+    const c0 = Math.min(gCols - 1, Math.max(0, Math.floor(gc)));
+    const r1 = Math.min(gRows - 1, r0 + 1);
+    const c1 = Math.min(gCols - 1, c0 + 1);
+    const fr = smoothstep(Math.min(1, Math.max(0, gr - r0)));
+    const fc = smoothstep(Math.min(1, Math.max(0, gc - c0)));
+    const h00 = grid[r0][c0];
+    const h01 = grid[r0][c1];
+    const h10 = grid[r1][c0];
+    const h11 = grid[r1][c1];
+    return (h00 * (1 - fc) + h01 * fc) * (1 - fr) + (h10 * (1 - fc) + h11 * fc) * fr;
+  };
+
+  const heights: number[][] = [];
   for (let r = 0; r < rows; r++) {
     const row: number[] = [];
+    const gr = (r / (rows - 1)) * (gRows - 1);
     for (let c = 0; c < cols; c++) {
-      let v = 0;
-      if (c > 0) v = row[c - 1] + (rng() - 0.5) * 3.0;
-      else if (r > 0) v = h[r - 1][c] + (rng() - 0.5) * 3.0;
-      v = Math.max(0, Math.min(8, v));
-      row.push(v);
+      const gc = (c / (cols - 1)) * (gCols - 1);
+      row.push(Math.max(0, Math.min(TERRAIN_MAX_HEIGHT, sampleGrid(gr, gc))));
     }
-    h.push(row);
+    heights.push(row);
   }
-  for (let pass = 0; pass < 2; pass++) {
-    const copy = h.map((r) => [...r]);
+
+  // 强制山丘：选一个靠近赛道的点，保证复杂赛道必然有升降起伏
+  const hillIdx = Math.floor(loop.length * (0.3 + rng() * 0.4));
+  const hx = loop[hillIdx].x;
+  const hz = loop[hillIdx].z;
+  const hillAmp = 4 + rng() * 2;
+  const hillSigma = 70 + rng() * 40;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = originX + c * TERRAIN_CELL;
+      const z = originZ + r * TERRAIN_CELL;
+      const d2 = (x - hx) ** 2 + (z - hz) ** 2;
+      const bump = hillAmp * Math.exp(-d2 / (2 * hillSigma * hillSigma));
+      heights[r][c] = Math.max(0, Math.min(TERRAIN_MAX_HEIGHT, heights[r][c] + bump));
+    }
+  }
+
+  // 相邻格高差钳制（保证地形本身可行驶；轨道采样后还有最终坡度钳制）
+  for (let pass = 0; pass < 3; pass++) {
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        let sum = copy[r][c];
-        let cnt = 1;
-        if (r > 0) { sum += copy[r - 1][c]; cnt++; }
-        if (r < rows - 1) { sum += copy[r + 1][c]; cnt++; }
-        if (c > 0) { sum += copy[r][c - 1]; cnt++; }
-        if (c < cols - 1) { sum += copy[r][c + 1]; cnt++; }
-        h[r][c] = Math.max(0, Math.min(8, sum / cnt));
+        const cur = heights[r][c];
+        if (r > 0 && heights[r - 1][c] - cur > TERRAIN_MAX_DIFF) heights[r - 1][c] = cur + TERRAIN_MAX_DIFF;
+        if (r < rows - 1 && heights[r + 1][c] - cur > TERRAIN_MAX_DIFF) heights[r + 1][c] = cur + TERRAIN_MAX_DIFF;
+        if (c > 0 && heights[r][c - 1] - cur > TERRAIN_MAX_DIFF) heights[r][c - 1] = cur + TERRAIN_MAX_DIFF;
+        if (c < cols - 1 && heights[r][c + 1] - cur > TERRAIN_MAX_DIFF) heights[r][c + 1] = cur + TERRAIN_MAX_DIFF;
       }
     }
   }
-  return h;
-}
 
-/** 随机哈密顿路径（网格）：随机化回溯 + Warnsdorff 启发 + 节点预算，失败回退蛇形。
- * 不要求闭环（末尾由 Catmull-Rom 闭合），搜索极快、不会卡死。 */
-function findHamiltonianPath(rows: number, cols: number, rng: () => number): number[] {
-  const L = rows * cols;
-  const idx = (r: number, c: number) => r * cols + c;
-  const neighborsOf = (i: number): number[] => {
-    const r = Math.floor(i / cols);
-    const c = i % cols;
-    const out: number[] = [];
-    if (r > 0) out.push(idx(r - 1, c));
-    if (r < rows - 1) out.push(idx(r + 1, c));
-    if (c > 0) out.push(idx(r, c - 1));
-    if (c < cols - 1) out.push(idx(r, c + 1));
-    return out;
+  const sample = (x: number, z: number): number => {
+    const fc = (x - originX) / TERRAIN_CELL;
+    const fr = (z - originZ) / TERRAIN_CELL;
+    const c0 = Math.min(cols - 2, Math.max(0, Math.floor(fc)));
+    const r0 = Math.min(rows - 2, Math.max(0, Math.floor(fr)));
+    const c1 = c0 + 1;
+    const r1 = r0 + 1;
+    const tc = Math.min(1, Math.max(0, fc - c0));
+    const tr = Math.min(1, Math.max(0, fr - r0));
+    const h00 = heights[r0][c0];
+    const h01 = heights[r0][c1];
+    const h10 = heights[r1][c0];
+    const h11 = heights[r1][c1];
+    return (h00 * (1 - tc) + h01 * tc) * (1 - tr) + (h10 * (1 - tc) + h11 * tc) * tr;
   };
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const start = Math.floor(rng() * L);
-    const path: number[] = [start];
-    const visited = new Set<number>([start]);
-    let budget = 30_000;
-    const dfs = (): boolean => {
-      if (path.length === L) {
-        return true;
-      }
-      if (--budget <= 0) {
-        throw new Error('budget');
-      }
-      const cur = path[path.length - 1];
-      const options = neighborsOf(cur).filter((n) => !visited.has(n));
-      options.sort(
-        (a, b) =>
-          neighborsOf(a).filter((x) => !visited.has(x)).length -
-            neighborsOf(b).filter((x) => !visited.has(x)).length || rng() - 0.5,
-      );
-      for (const n of options) {
-        visited.add(n);
-        path.push(n);
-        if (dfs()) return true;
-        path.pop();
-        visited.delete(n);
-      }
-      return false;
-    };
-    try {
-      if (dfs()) return path;
-    } catch {
-      // 预算用尽，换种子重试
-    }
-  }
-  const fallback: number[] = [];
-  for (let r = 0; r < rows; r++) {
-    const c0 = r % 2 === 0 ? 0 : cols - 1;
-    const dc = r % 2 === 0 ? 1 : -1;
-    for (let k = 0; k < cols; k++) fallback.push(idx(r, c0 + k * dc));
-  }
-  return fallback;
+
+  return { originX, originZ, cell: TERRAIN_CELL, rows, cols, heights, sample };
 }
 
-/** 复杂赛道：随机 M×N 高度矩阵 + 随机哈密顿路径（非平行车道）；
- * 沿路径相邻格高差 ≤1.0m（一点点升降，坡度可行驶）；Catmull-Rom 平滑为闭环。 */
+/** 复杂赛道（地形优先）：先生成覆盖区域的 2D 高度图地形，再在其上画 2D 闭环轨道；
+ * 轨道逐点采样地形高度，最后钳制坡度 ≤12%；不处理交叉轨道。 */
 function generateComplexTrack(meta: TrackMeta): THREE.Vector3[] {
   const rng = mulberry32(meta.seed);
   const targetLength = 1800 + rng() * 800; // 1800~2600m 随机
-  const rows = 5 + Math.floor(rng() * 4); // 5~8 行
-  const cellLen = 24 + rng() * 8; // 每格沿 x 长度（长方体区域）
-  const laneGap = 20 + rng() * 8; // 每格沿 z 宽度
-  const cols = Math.max(10, Math.round(targetLength / (rows * ((cellLen + laneGap) / 2))));
-
-  const h = generateHeightMap(rows, cols, rng);
-  const cycle = findHamiltonianPath(rows, cols, rng);
-
-  // 沿路径钳制相邻格高度差 ≤1.0m（含闭环首尾）
-  const clampCell = (a: number, b: number): void => {
-    const r1 = Math.floor(b / cols);
-    const c1 = b % cols;
-    const r0 = Math.floor(a / cols);
-    const c0 = a % cols;
-    let d = h[r1][c1] - h[r0][c0];
-    if (d > 1.0) h[r1][c1] = h[r0][c0] + 1.0;
-    if (d < -1.0) h[r1][c1] = h[r0][c0] - 1.0;
-    h[r1][c1] = Math.max(0, Math.min(8, h[r1][c1]));
-  };
-  for (let k = 1; k < cycle.length; k++) clampCell(cycle[k - 1], cycle[k]);
-  clampCell(cycle[cycle.length - 1], cycle[0]);
-
-  // 控制点 = 格中心（含高度），Catmull-Rom 闭环平滑
-  const controls = cycle.map((i) => {
-    const r = Math.floor(i / cols);
-    const c = i % cols;
-    return new THREE.Vector3((c + 0.5) * cellLen, h[r][c], (r + 0.5) * laneGap);
-  });
-  const curve = new THREE.CatmullRomCurve3(controls, true, 'catmullrom', 0.6);
-  const steps = Math.max(300, Math.round(targetLength / SAMPLE_SPACING));
-  const pts: THREE.Vector3[] = [];
-  for (let i = 0; i < steps; i++) pts.push(curve.getPoint(i / steps));
-
-  const scaled = scaleLoop(pts, targetLength);
-  // 最终坡度钳制：相邻采样点最大坡度 ≤ 12%（消除 Catmull-Rom 高度过冲与缩放影响）
+  const loop = generateStarLoop(rng, targetLength);
+  const terrain = generateTerrain(loop, meta.seed);
+  const pts = loop.map((p) => new THREE.Vector3(p.x, terrain.sample(p.x, p.z), p.z));
+  // 最终坡度钳制：相邻采样点最大坡度 ≤ 12%
   for (let pass = 0; pass < 3; pass++) {
-    for (let i = 0; i < scaled.length; i++) {
-      const j = (i + 1) % scaled.length;
-      const dy = scaled[j].y - scaled[i].y;
-      const ds = Math.max(0.01, Math.hypot(scaled[j].x - scaled[i].x, scaled[j].z - scaled[i].z));
+    for (let i = 0; i < pts.length; i++) {
+      const j = (i + 1) % pts.length;
+      const dy = pts[j].y - pts[i].y;
+      const ds = Math.max(0.01, Math.hypot(pts[j].x - pts[i].x, pts[j].z - pts[i].z));
       const slope = dy / ds;
-      if (slope > 0.12) scaled[j].y = scaled[i].y + 0.12 * ds;
-      else if (slope < -0.12) scaled[j].y = scaled[i].y - 0.12 * ds;
+      if (slope > 0.12) pts[j].y = pts[i].y + 0.12 * ds;
+      else if (slope < -0.12) pts[j].y = pts[i].y - 0.12 * ds;
     }
   }
-  return scaled;
+  return pts;
 }
-/** 根据种子生成闭环中心线采样点（简单=随机点光滑曲线；复杂=随机高度矩阵 + 哈密顿环） */
+
+/** 根据种子生成闭环中心线采样点（简单=随机点光滑曲线；复杂=地形优先：先高度图后轨道） */
 export function generateCenterlinePoints(meta: TrackMeta): THREE.Vector3[] {
   return meta.mode === 'simple' ? generateSimpleTrack(meta) : generateComplexTrack(meta);
 }
@@ -286,6 +297,7 @@ function buildRoadRibbon(
   points: THREE.Vector3[],
   tangents: THREE.Vector3[],
   halfWidths: number[],
+  terrain: TerrainData | null,
 ): { geometry: THREE.BufferGeometry; positions: number[]; indices: number[] } {
   const n = points.length;
   const positions: number[] = [];
@@ -297,8 +309,15 @@ function buildRoadRibbon(
     rightVectors.push(right);
     const p = points[i];
     const hw = halfWidths[i];
-    positions.push(p.x - right.x * hw, p.y, p.z - right.z * hw);
-    positions.push(p.x + right.x * hw, p.y, p.z + right.z * hw);
+    const lx = p.x - right.x * hw;
+    const lz = p.z - right.z * hw;
+    const rx = p.x + right.x * hw;
+    const rz = p.z + right.z * hw;
+    // 地形优先：路面两侧边沿跟随地形高度（贴地），避免斜坡上悬浮/埋入
+    const ly = terrain ? terrain.sample(lx, lz) : p.y;
+    const ry = terrain ? terrain.sample(rx, rz) : p.y;
+    positions.push(lx, ly, lz);
+    positions.push(rx, ry, rz);
   }
 
   const indices: number[] = [];
@@ -322,9 +341,8 @@ function buildRoadRibbon(
 
 function buildGroundVisual(
   mode: TrackMeta['mode'],
-  points: THREE.Vector3[],
-  elev: ((x: number, z: number) => number) | null,
-): THREE.Mesh {
+  terrain: TerrainData | null,
+): { mesh: THREE.Mesh; positions: number[]; indices: number[] } {
   if (mode === 'simple') {
     const geo = new THREE.PlaneGeometry(1800, 1800);
     geo.rotateX(-Math.PI / 2);
@@ -332,44 +350,37 @@ function buildGroundVisual(
       geo,
       new THREE.MeshStandardMaterial({ color: 0x3e8e41, roughness: 1 }),
     );
+    mesh.name = 'ground';
     mesh.position.y = -0.08;
     mesh.receiveShadow = true;
-    return mesh;
+    return { mesh, positions: [], indices: [] };
   }
 
-  const margin = 45;
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (const p of points) {
-    minX = Math.min(minX, p.x);
-    maxX = Math.max(maxX, p.x);
-    minZ = Math.min(minZ, p.z);
-    maxZ = Math.max(maxZ, p.z);
-  }
-  const width = maxX - minX + margin * 2;
-  const depth = maxZ - minZ + margin * 2;
-  const segX = Math.min(140, Math.max(40, Math.round(width / 2)));
-  const segZ = Math.min(140, Math.max(40, Math.round(depth / 2)));
+  const originX = terrain!.originX;
+  const originZ = terrain!.originZ;
+  const width = (terrain!.cols - 1) * terrain!.cell;
+  const depth = (terrain!.rows - 1) * terrain!.cell;
+  // 网格细分与地形数据一致（每格一个顶点），避免物理 Trimesh 过密
+  const segX = Math.min(140, Math.max(24, Math.round(width / terrain!.cell)));
+  const segZ = Math.min(140, Math.max(24, Math.round(depth / terrain!.cell)));
   const geo = new THREE.PlaneGeometry(width, depth, segX, segZ);
   geo.rotateX(-Math.PI / 2);
   const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
-  const originX = minX - margin;
-  const originZ = minZ - margin;
   for (let i = 0; i < posAttr.count; i++) {
-    const x = posAttr.getX(i);
-    const z = posAttr.getZ(i);
-    const wx = originX + x;
-    const wz = originZ + z;
-    posAttr.setY(i, (elev ? elev(wx, wz) : 0) - 0.08);
+    // 平面几何中心在原点：把局部坐标换算成地形世界坐标，并直接写入世界位置
+    const wx = originX + posAttr.getX(i) + width / 2;
+    const wz = originZ + posAttr.getZ(i) + depth / 2;
+    posAttr.setX(i, wx);
+    posAttr.setY(i, terrain!.sample(wx, wz));
+    posAttr.setZ(i, wz);
   }
   posAttr.needsUpdate = true;
   geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x3e8e41, roughness: 1 }));
-  mesh.position.set(originX, 0, originZ);
+  mesh.name = 'ground';
   mesh.receiveShadow = true;
-  return mesh;
+  const indices: number[] = Array.from(geo.getIndex()?.array ?? []);
+  return { mesh, positions: Array.from(posAttr.array as Float32Array), indices };
 }
 
 function buildBarriers(
@@ -377,6 +388,7 @@ function buildBarriers(
   tangents: THREE.Vector3[],
   halfWidths: number[],
   barrierHeight: number,
+  terrain: TerrainData | null,
 ): { visual: THREE.Mesh[]; bodies: CANNON.Body[] } {
   const visual: THREE.Mesh[] = [];
   const bodies: CANNON.Body[] = [];
@@ -391,16 +403,12 @@ function buildBarriers(
     const offsetJ = halfWidths[b] + BARRIER_THICKNESS / 2 + 0.08;
 
     for (const side of [-1, 1]) {
-      const eI = new THREE.Vector3(
-        points[a].x + rightI.x * offsetI * side,
-        points[a].y,
-        points[a].z + rightI.z * offsetI * side,
-      );
-      const eJ = new THREE.Vector3(
-        points[b].x + rightJ.x * offsetJ * side,
-        points[b].y,
-        points[b].z + rightJ.z * offsetJ * side,
-      );
+      const eIx = points[a].x + rightI.x * offsetI * side;
+      const eIz = points[a].z + rightI.z * offsetI * side;
+      const eJx = points[b].x + rightJ.x * offsetJ * side;
+      const eJz = points[b].z + rightJ.z * offsetJ * side;
+      const eI = new THREE.Vector3(eIx, terrain ? terrain.sample(eIx, eIz) : points[a].y, eIz);
+      const eJ = new THREE.Vector3(eJx, terrain ? terrain.sample(eJx, eJz) : points[b].y, eJz);
       const mid = eI.clone().add(eJ).multiplyScalar(0.5);
       const dir = eJ.clone().sub(eI);
       // 段长放大 1.15 倍让相邻护栏重叠，消除弯道外侧的楔形缝隙
@@ -435,8 +443,8 @@ function buildBarriers(
     const yaw = Math.atan2(tangents[k].x, tangents[k].z);
     for (const side of [-1, 1]) {
       const cx = p.x + right.x * offset * side;
-      const cy = p.y;
       const cz = p.z + right.z * offset * side;
+      const cy = terrain ? terrain.sample(cx, cz) : p.y;
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(BARRIER_THICKNESS, barrierHeight, len), material);
       mesh.position.set(cx, cy + barrierHeight / 2, cz);
       mesh.rotation.y = yaw;
@@ -535,14 +543,24 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
   const roadWidth = CAR.width * ROAD_WIDTH_MULTIPLIER;
   const halfWidths = computeHalfWidths(points, tangents, roadWidth / 2);
   const barrierHeight = CAR.height * BARRIER_HEIGHT_FACTOR;
+  // 地形优先：复杂赛道先生成覆盖区域的高度图地形，轨道/护栏/环境都贴在地形上
+  const terrain = meta.mode === 'complex' ? generateTerrain(points, meta.seed) : null;
 
   const group = new THREE.Group();
   group.name = 'track-root';
 
-  const { geometry, positions, indices } = buildRoadRibbon(points, tangents, halfWidths);
+  const { geometry, positions, indices } = buildRoadRibbon(points, tangents, halfWidths, terrain);
   const roadMesh = new THREE.Mesh(
     geometry,
-    new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.95, metalness: 0 }),
+    new THREE.MeshStandardMaterial({
+      color: 0x3a3f47,
+      roughness: 0.95,
+      metalness: 0,
+      // 贴地路面与地形共面，用多边形偏移避免 z-fighting
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    }),
   );
   roadMesh.name = 'road';
   roadMesh.receiveShadow = true;
@@ -560,16 +578,16 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
   startLine.rotation.y = Math.atan2(t0.x, t0.z);
   group.add(startLine);
 
-  // 复杂赛道为高架桥式：路面自带起伏，地面统一为平地
-  group.add(buildGroundVisual(meta.mode, points, null));
+  const groundVisual = buildGroundVisual(meta.mode, terrain);
+  group.add(groundVisual.mesh);
 
   // 环境装饰（树/石头，避开路面）
-  group.add(buildEnvironment(meta, points, halfWidths, Math.max(...halfWidths)));
+  group.add(buildEnvironment(meta, points, halfWidths, Math.max(...halfWidths), terrain));
 
-  const { visual: barrierVisual, bodies: barrierBodies } = buildBarriers(points, tangents, halfWidths, barrierHeight);
+  const { visual: barrierVisual, bodies: barrierBodies } = buildBarriers(points, tangents, halfWidths, barrierHeight, terrain);
   for (const b of barrierVisual) group.add(b);
 
-  // 物理地面：简单模式用无限平面；复杂模式用路面 Trimesh + 安全兜底平面
+  // 物理地面：简单模式用无限平面；复杂模式用整片地形 Trimesh + y=-30 安全兜底平面
   let ground: CANNON.Body;
   if (meta.mode === 'simple') {
     // cannon-es Plane 默认法线为 (0,0,1)；绕 X 轴旋转 -90° 使其朝上。
@@ -579,13 +597,10 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
     ground = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), quaternion: planeQuat });
     ground.updateAABB();
   } else {
-    const trimesh = new CANNON.Trimesh(positions, indices);
+    const trimesh = new CANNON.Trimesh(groundVisual.positions, groundVisual.indices);
     ground = new CANNON.Body({ mass: 0, shape: trimesh });
-    // 平地面物理：车掉出高架路面时落到地面，而不是无限坠落
-    const flatQuat = new CANNON.Quaternion().setFromEuler(-Math.PI / 2, 0, 0);
-    const flat = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), quaternion: flatQuat });
-    flat.updateAABB();
-    barrierBodies.push(flat);
+    ground.updateAABB();
+    // 安全兜底：掉出地形范围时落到 y=-30 平面，而不是无限坠落
     const catcherQuat = new CANNON.Quaternion().setFromEuler(-Math.PI / 2, 0, 0);
     const catcher = new CANNON.Body({
       mass: 0,
@@ -609,5 +624,6 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
     group,
     physics: { ground, barriers: barrierBodies },
     roadGeometry: { positions, indices },
+    terrain,
   };
 }

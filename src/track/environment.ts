@@ -1,13 +1,15 @@
 import * as THREE from 'three';
 import type { TrackMeta } from '../types';
 import { mulberry32 } from '../utils/random';
+import type { TerrainData } from './generator';
 
-/** 简单环境生成：低多边形树与石头，纯装饰，自动避开所有路面 */
+/** 环境生成：低多边形树与石头，纯装饰，自动避开所有路面；复杂赛道按地形高度摆放 */
 export function buildEnvironment(
   meta: TrackMeta,
   points: THREE.Vector3[],
   halfWidths: number[],
   maxHalfWidth: number,
+  terrain: TerrainData | null,
 ): THREE.Group {
   const group = new THREE.Group();
   group.name = 'environment';
@@ -46,7 +48,7 @@ export function buildEnvironment(
 
     const isTree = rng() < 0.7;
     const obj = new THREE.Group();
-    obj.position.set(x, 0, z);
+    obj.position.set(x, terrain ? terrain.sample(x, z) : 0, z);
     obj.rotation.y = rng() * Math.PI * 2;
     if (isTree) {
       // 树：随机粗细/高低/树冠大小/形状

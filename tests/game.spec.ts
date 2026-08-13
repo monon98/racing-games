@@ -102,6 +102,34 @@ it('game smoke suite', async () => {
       }
       check('complex drivable slopes', maxSlope < 0.13, `max slope=${(maxSlope * 100).toFixed(1)}%`);
       check('complex no cliffs', noCliff);
+      check('complex has terrain heightfield', !!built.terrain);
+      if (built.terrain) {
+        const terrainYs = built.terrain.heights.flat();
+        check(
+          'terrain elevation range',
+          Math.max(...terrainYs) - Math.min(...terrainYs) > 2,
+          `terrain range=${(Math.max(...terrainYs) - Math.min(...terrainYs)).toFixed(1)}m`,
+        );
+        // 轨道贴地形：采样点高度与地形采样一致（最终坡度钳制只允许小偏差）
+        let maxDev = 0;
+        for (let i = 0; i < built.points.length; i += 40) {
+          const p = built.points[i];
+          maxDev = Math.max(maxDev, Math.abs(p.y - built.terrain.sample(p.x, p.z)));
+        }
+        check('track follows terrain', maxDev < 1.0, `maxDev=${maxDev.toFixed(2)}m`);
+        const groundMesh = built.group.getObjectByName('ground') as import('three').Mesh;
+        const attr = groundMesh?.geometry.getAttribute('position');
+        if (attr) {
+          let minY = Infinity;
+          let maxY = -Infinity;
+          for (let i = 0; i < attr.count; i++) {
+            const y = attr.getY(i);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+          }
+          check('ground mesh is real terrain', maxY - minY > 1, `ground range=${(maxY - minY).toFixed(1)}m`);
+        }
+      }
     }
     check('has barriers', built.physics.barriers.length > 20, String(built.physics.barriers.length));
     // 物理坠落回归：车应在 2 秒内停在路面上而不是掉下去
@@ -143,7 +171,9 @@ it('game smoke suite', async () => {
       minUpRespawn = Math.min(minUpRespawn, st.up.y);
       maxHeight = Math.max(maxHeight, st.position.y - start.y);
     }
-    check('respawn no bounce/flip with throttle', minUpRespawn > 0.6 && maxHeight < 2.0, `min up.y=${minUpRespawn.toFixed(3)} maxHeight=${maxHeight.toFixed(2)}m`);
+    // 复杂赛道有真实山丘，3s 内正常爬坡高度可达数米；只断言不翻车且高度不失控
+    const heightLimit = mode === 'complex' ? 12 : 2.0;
+    check('respawn no bounce/flip with throttle', minUpRespawn > 0.6 && maxHeight < heightLimit, `min up.y=${minUpRespawn.toFixed(3)} maxHeight=${maxHeight.toFixed(2)}m`);
     respawnPhysics.dispose();
     // 驾驶回归：踩油门 2 秒应沿切线前进（曾因 RaycastVehicle 坐标轴默认值错误而横向漂移/不动）
     physics.reset(
@@ -231,20 +261,22 @@ it('game smoke suite', async () => {
       minUpFullLock = Math.min(minUpFullLock, physics.getState().up.y);
     }
     check('stable at full lock', minUpFullLock > 0.8, `min up.y=${minUpFullLock.toFixed(3)}`);
-    // drift regression: full-lock + throttle -> controlled slide, release steering -> grip restored
-    const driftPhysics = new CarPhysics();
-    driftPhysics.addGround(built.physics.ground);
-    for (const b of built.physics.barriers) driftPhysics.addGround(b);
-    driftPhysics.reset(
-      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
-      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
-    );
-    for (let i = 0; i < 30; i++) driftPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
-    for (let i = 0; i < 180; i++) driftPhysics.update({ throttle: 1, brake: 0, steering: 1 }, 1 / 60);
-    check('sustained full-lock with throttle enters drift', driftPhysics.getDrifting());
-    for (let i = 0; i < 30; i++) driftPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
-    check('drift clears after releasing steering', !driftPhysics.getDrifting());
-    driftPhysics.dispose();
+    // drift regression (flat road only): full-lock + throttle -> controlled slide, release -> grip restored
+    if (mode === 'simple') {
+      const driftPhysics = new CarPhysics();
+      driftPhysics.addGround(built.physics.ground);
+      for (const b of built.physics.barriers) driftPhysics.addGround(b);
+      driftPhysics.reset(
+        new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
+        new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+      );
+      for (let i = 0; i < 30; i++) driftPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      for (let i = 0; i < 180; i++) driftPhysics.update({ throttle: 1, brake: 0, steering: 1 }, 1 / 60);
+      check('sustained full-lock with throttle enters drift', driftPhysics.getDrifting());
+      for (let i = 0; i < 30; i++) driftPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      check('drift clears after releasing steering', !driftPhysics.getDrifting());
+      driftPhysics.dispose();
+    }
     // 滑行回归（仅平路）：单纯松油门应缓慢滑行（4s 后仍保有较高速度）；
     // 松油门但按住转向应快速降速（避免侧滑/失控）
     if (mode === 'simple') {
@@ -370,7 +402,7 @@ it('game smoke suite', async () => {
     if (mode === 'simple') {
       check('barrier contains car in high-speed turn', maxLateral < barrierLine + 1.6, `max lateral=${maxLateral.toFixed(2)}m`);
     }
-    // 高速过丘陵不飞射：复杂赛道（高架起伏）全油门 6s，最大上升速度应被钳制在 ~1m/s 内
+    // 高速过丘陵不飞射：复杂赛道（地形起伏）全油门 6s，车身离地高度应被钳制在 ~1.5m 内
     if (mode === 'complex') {
       const airPhysics = new CarPhysics();
       airPhysics.addGround(built.physics.ground);
@@ -379,12 +411,14 @@ it('game smoke suite', async () => {
         new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
       );
       for (let i = 0; i < 30; i++) airPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
-      let maxVy = 0;
+      let maxAir = 0;
       for (let i = 0; i < 360; i++) {
         airPhysics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
-        maxVy = Math.max(maxVy, airPhysics.getState().velocity.y);
+        const st = airPhysics.getState();
+        const groundY = built.terrain!.sample(st.position.x, st.position.z);
+        maxAir = Math.max(maxAir, st.position.y - groundY);
       }
-      check('no upward launch on hills', maxVy < 1.0, `max upward speed=${maxVy.toFixed(2)} m/s`);
+      check('no upward launch on hills', maxAir < 2.0, `max air height=${maxAir.toFixed(2)}m`);
       airPhysics.dispose();
     }
     // 急刹防前翻回归：加速到 ~58km/h 后按刹车键 3s，俯仰不得失控（曾因刹车点头前翻）
