@@ -1,9 +1,15 @@
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildCar } from '../car/createCar';
 import { CHASSIS_SPAWN_HEIGHT } from '../physics/vehicle';
 import type { BuiltTrack } from '../track/generator';
 
-/** 启动页赛道/赛车 3D 预览：环绕相机缓慢旋转 */
+export interface TrackPreviewOptions {
+  /** 自由镜头：OrbitControls（拖动旋转/右键平移/滚轮缩放）；默认 false = 环绕慢转 */
+  freeCamera?: boolean;
+}
+
+/** 赛道/赛车 3D 预览：默认环绕相机缓慢旋转，也可开启自由镜头 */
 export class TrackPreview {
   private readonly container: HTMLElement;
   private readonly renderer: THREE.WebGLRenderer;
@@ -18,11 +24,14 @@ export class TrackPreview {
   private height = 120;
   private angle = 0;
   private readonly onResize: () => void;
+  private readonly freeCamera: boolean;
+  private controls: OrbitControls | null = null;
 
-  constructor(container: HTMLElement, track: BuiltTrack, carColor: string) {
+  constructor(container: HTMLElement, track: BuiltTrack, carColor: string, options: TrackPreviewOptions = {}) {
     this.container = container;
     this.track = track;
     this.carColor = carColor;
+    this.freeCamera = options.freeCamera ?? false;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -39,6 +48,16 @@ export class TrackPreview {
     this.scene.add(this.track.group);
     this.rebuildCar();
     this.frameCamera();
+    if (this.freeCamera) {
+      this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+      this.controls.target.copy(this.center.clone().add(new THREE.Vector3(0, 2, 0)));
+      this.controls.enableDamping = true;
+      this.controls.dampingFactor = 0.08;
+      this.controls.minDistance = 5;
+      this.controls.maxDistance = 900;
+      this.controls.maxPolarAngle = Math.PI * 0.49;
+      this.controls.update();
+    }
     this.resize();
 
     this.onResize = () => this.resize();
@@ -52,6 +71,10 @@ export class TrackPreview {
     this.scene.add(this.track.group);
     this.rebuildCar();
     this.frameCamera();
+    if (this.controls) {
+      this.controls.target.copy(this.center.clone().add(new THREE.Vector3(0, 2, 0)));
+      this.controls.update();
+    }
     this.resize();
   }
 
@@ -84,13 +107,17 @@ export class TrackPreview {
 
   private tick(): void {
     const dt = Math.min(0.05, this.clock.getDelta());
-    this.angle += dt * 0.07;
-    this.camera.position.set(
-      this.center.x + Math.sin(this.angle) * this.radius,
-      this.height,
-      this.center.z + Math.cos(this.angle) * this.radius,
-    );
-    this.camera.lookAt(this.center.clone().add(new THREE.Vector3(0, 2, 0)));
+    if (this.controls) {
+      this.controls.update();
+    } else {
+      this.angle += dt * 0.07;
+      this.camera.position.set(
+        this.center.x + Math.sin(this.angle) * this.radius,
+        this.height,
+        this.center.z + Math.cos(this.angle) * this.radius,
+      );
+      this.camera.lookAt(this.center.clone().add(new THREE.Vector3(0, 2, 0)));
+    }
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -103,6 +130,7 @@ export class TrackPreview {
   }
 
   dispose(): void {
+    this.controls?.dispose();
     this.renderer.setAnimationLoop(null);
     window.removeEventListener('resize', this.onResize);
     this.renderer.dispose();

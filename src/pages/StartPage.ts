@@ -36,7 +36,10 @@ export function mountStartPage(root: HTMLElement): () => void {
             <span>汽车颜色</span>
             <input id="car-color" type="color" />
           </label>
-          <button id="btn-start" class="btn btn-primary">开始游戏</button>
+          <div class="start-actions">
+            <button id="btn-start" class="btn btn-primary">开始游戏</button>
+            <button id="btn-preview" class="btn">赛道 / 赛车预览</button>
+          </div>
         </section>
 
         <section class="panel">
@@ -215,6 +218,10 @@ export function mountStartPage(root: HTMLElement): () => void {
         toast('玩家名称为空，已使用默认名称「玩家」');
       }
       window.location.hash = '#/game';
+    });
+
+    document.querySelector('#btn-preview')!.addEventListener('click', () => {
+      window.location.hash = '#/preview';
     });
 
     document.querySelector('#btn-regenerate')!.addEventListener('click', () => {

@@ -45,6 +45,7 @@
 - [x] 测试拆分：track/physics/gltf/rules 四个 spec + helpers，新增 `pnpm test:*` 针对性运行
 - [x] 复杂赛道道路不再露绿：贴地路面抬高 0.05m
 - [x] 复杂赛道起伏增强：地形 0~14m + 双山丘 + 坡度 10%，空中 3.2g 下压力抑制飞车
+- [x] 赛道/赛车自由镜头预览页（`#/preview`，OrbitControls），首页添加入口
 - [x] 工程验证：`pnpm typecheck`、`pnpm build`、`pnpm smoke`（Node 冒烟：赛道生成/物理/GLB 往返）全部通过
 
 ## 未完成 / 待办
