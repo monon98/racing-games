@@ -113,6 +113,13 @@
 - `.github/workflows/deploy.yml`：push 到 main 或手动触发 → pnpm 安装/类型检查/构建 → `actions/configure-pages` + `upload-pages-artifact` + `deploy-pages` 发布。
 - `vite.config.ts`：base 动态化——GitHub Actions 下按仓库名生成 `/racing-games/` 子路径，本地保持 `./`（hash 路由无需 404 处理）。
 - `public/.nojekyll`：防止 GitHub Pages 用 Jekyll 处理站点。
+
+## 2026-08-14 复杂赛道重做：随机 M×N 高度矩阵 + 可行驶斜坡
+- 复杂模式不再是“双圆 8 / lemniscate + 海拔区段”，改为**网格车道**：随机生成 M 行（2/4/6） × N 列高度矩阵，每格是长方体区域（宽=车道间距、长=cellLen），偶数条车道由发卡弯连成闭环。
+- 高度 0~6m、相邻格高差 ≤1.0m、格间 14m 平滑过渡 → 最大坡度约 7%（可行驶）；发卡弯两端高差由“沿行驶方向生成”天然 ≤1.0m。
+- 格子数按“目标长度 − 发卡弯弧长”解析计算，缩放系数 ≈1，坡度不受缩放影响。
+- 交叉净空保证：任何 XZ 贴近的异段路面高度差 ≥2m（隆起 3m、40 点宽、坡度 ≈9%），车能通过且相机不被遮挡。
+- 冒烟新增：complex drivable slopes（<13%）、complex no cliffs、complex crossing clearance、多种子有效性；护栏防穿透与快速切换等改为平路调校项。
 - M3 范围：环境装饰（树/石头）、音效与光影、多文件 `.gltf+.bin` 导入、vitest/代码分割（见 `docs/roadmap.md`）。
 - 驾驶手感调优参数（发动机力、悬架、转向）集中在 `src/physics/vehicle.ts` 顶部常量，改手感先动那里。
 - 浏览器人工验收清单（持久化、清榜、GLB 往返、重生惩罚、暂停/返回、小地图）见 `docs/progress.md`。

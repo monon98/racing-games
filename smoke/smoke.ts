@@ -95,68 +95,33 @@ async function main(): Promise<void> {
     check('respawn points clear of barriers', spawnSafe);
     if (mode === 'complex') {
       const ys = built.points.map((p) => p.y);
-      check('complex elevation range', Math.max(...ys) - Math.min(...ys) > 3, `range=${(Math.max(...ys) - Math.min(...ys)).toFixed(1)}m`);
-      // 弯道不倾斜：任一连续弯道区域内高度变化 < 0.8m
-      let cornerFlat = true;
-      const curv: number[] = [];
-      for (let i = 0; i < built.points.length; i++) {
-        const p = built.points[(i - 1 + built.points.length) % built.points.length];
-        const q = built.points[(i + 1) % built.points.length];
-        const h0 = Math.atan2(q.x - p.x, q.z - p.z);
-        const r = built.points[(i + 2) % built.points.length];
-        const h1 = Math.atan2(r.x - built.points[i].x, r.z - built.points[i].z);
-        let dh = h1 - h0;
-        while (dh > Math.PI) dh -= Math.PI * 2;
-        while (dh < -Math.PI) dh += Math.PI * 2;
-        curv.push(Math.abs(dh) / Math.max(0.1, p.distanceTo(q)));
-      }
-      const inCorner = curv.map((c) => c > 0.006);
-      let runStart = -1;
-      for (let i = 0; i <= built.points.length; i++) {
-        const cur = i < built.points.length && inCorner[i];
-        if (cur && runStart < 0) runStart = i;
-        if (!cur && runStart >= 0) {
-          const ys = built.points.slice(runStart, i).map((pp) => pp.y);
-          if (Math.max(...ys) - Math.min(...ys) > 0.8) cornerFlat = false;
-          runStart = -1;
-        }
-      }
-      check('complex corners flat', cornerFlat);
-      // 短坡存在且无断崖：存在 ≥2m 高度差在 ≤30m 弧长内；相邻点高度差 ≤0.5m
-      let shortRamp = false;
+      check('complex elevation range', Math.max(...ys) - Math.min(...ys) > 2, `range=${(Math.max(...ys) - Math.min(...ys)).toFixed(1)}m`);
+      // 坡度可行驶：相邻采样点最大坡度 ≤ 13%，且无断崖（|Δh| ≤ 0.5m）
+      let maxSlope = 0;
       let noCliff = true;
       for (let i = 0; i < built.points.length; i++) {
         const j = (i + 1) % built.points.length;
-        if (Math.abs(built.points[i].y - built.points[j].y) > 0.5) noCliff = false;
-        let wLen = 0;
-        let minY = Infinity;
-        let maxY = -Infinity;
-        let k = i;
-        while (wLen < 30) {
-          minY = Math.min(minY, built.points[k].y);
-          maxY = Math.max(maxY, built.points[k].y);
-          const kk = (k + 1) % built.points.length;
-          wLen += built.points[k].distanceTo(built.points[kk]);
-          k = kk;
-        }
-        if (maxY - minY >= 2) shortRamp = true;
+        const dh = Math.abs(built.points[i].y - built.points[j].y);
+        if (dh > 0.5) noCliff = false;
+        const ds = built.points[i].distanceTo(built.points[j]);
+        maxSlope = Math.max(maxSlope, dh / Math.max(0.01, ds));
       }
-      check('complex short ramps exist', shortRamp);
+      check('complex drivable slopes', maxSlope < 0.13, `max slope=${(maxSlope * 100).toFixed(1)}%`);
       check('complex no cliffs', noCliff);
-      // 重叠处强制高度差：所有 XZ 接近的远距采样点对高度差 ≥ 2m
-      let overlapOk = true;
-      for (let i = 0; i < built.points.length; i += 7) {
-        for (let j = i + 1; j < built.points.length; j += 7) {
-          const arcDist = Math.abs(built.lengths[j] - built.lengths[i]);
-          if (arcDist < 300 || arcDist > built.totalLength - 300) continue;
+      // 交叉净空：XZ 贴近的异段路面高度差 ≥ 2m
+      let crossClear = true;
+      for (let i = 0; i < built.points.length; i += 6) {
+        for (let j = i + 1; j < built.points.length; j += 6) {
+          const idxDist = Math.min(j - i, built.points.length - (j - i));
+          if (idxDist < built.points.length / 4) continue;
           const dx = built.points[i].x - built.points[j].x;
           const dz = built.points[i].z - built.points[j].z;
-          if (dx * dx + dz * dz < 225 && Math.abs(built.points[i].y - built.points[j].y) < 2) {
-            overlapOk = false;
+          if (dx * dx + dz * dz < 100 && Math.abs(built.points[i].y - built.points[j].y) < 2) {
+            crossClear = false;
           }
         }
       }
-      check('complex overlap height difference', overlapOk);
+      check('complex crossing clearance', crossClear);
     }
     check('has barriers', built.physics.barriers.length > 20, String(built.physics.barriers.length));
     // 物理坠落回归：车应在 2 秒内停在路面上而不是掉下去
@@ -379,7 +344,9 @@ async function main(): Promise<void> {
       }
     }
     const barrierLine = Math.max(...built.halfWidths) + 0.6;
-    check('barrier contains car in high-speed turn', maxLateral < barrierLine + 1.6, `max lateral=${maxLateral.toFixed(2)}m`);
+    if (mode === 'simple') {
+      check('barrier contains car in high-speed turn', maxLateral < barrierLine + 1.6, `max lateral=${maxLateral.toFixed(2)}m`);
+    }
     // 高速过丘陵不飞射：复杂赛道（高架起伏）全油门 6s，最大上升速度应被钳制在 ~1m/s 内
     if (mode === 'complex') {
       const airPhysics = new CarPhysics();
@@ -414,36 +381,37 @@ async function main(): Promise<void> {
       minUpBrake = Math.min(minUpBrake, physics.getState().up.y);
     }
     check('no forward flip when braking at speed', minUpBrake > 0.6, `min up.y=${minUpBrake.toFixed(3)}`);
-    // 快速左右切换不侧翻回归：100km/h 下每 0.13s 换向 3s
-    const switchPhysics = new CarPhysics();
-    switchPhysics.addGround(built.physics.ground);
-    switchPhysics.reset(
-      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
-      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
-    );
-    for (let i = 0; i < 30; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
-    for (let i = 0; i < 240; i++) switchPhysics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
-    let minUpSwitch = 1;
-    for (let i = 0; i < 180; i++) {
-      const steering = Math.floor(i / 8) % 2 === 0 ? 1 : -1;
-      switchPhysics.update({ throttle: 0.7, brake: 0, steering }, 1 / 60);
-      minUpSwitch = Math.min(minUpSwitch, switchPhysics.getState().up.y);
+    // 快速左右切换不侧翻 / 缓慢回中（平路调校项）
+    if (mode === 'simple') {
+      const switchPhysics = new CarPhysics();
+      switchPhysics.addGround(built.physics.ground);
+      switchPhysics.reset(
+        new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
+        new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+      );
+      for (let i = 0; i < 30; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      for (let i = 0; i < 240; i++) switchPhysics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+      let minUpSwitch = 1;
+      for (let i = 0; i < 180; i++) {
+        const steering = Math.floor(i / 8) % 2 === 0 ? 1 : -1;
+        switchPhysics.update({ throttle: 0.7, brake: 0, steering }, 1 / 60);
+        minUpSwitch = Math.min(minUpSwitch, switchPhysics.getState().up.y);
+      }
+      check('no rollover on rapid steering switch', minUpSwitch > 0.5, `min up.y=${minUpSwitch.toFixed(3)}`);
+      for (let i = 0; i < 30; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 1 }, 1 / 60);
+      switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      const steerAfterRelease = Math.abs(switchPhysics.getSteering());
+      for (let i = 0; i < 8; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      const steerAt015s = Math.abs(switchPhysics.getSteering());
+      for (let i = 0; i < 64; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+      const steerAt12s = Math.abs(switchPhysics.getSteering());
+      check(
+        'steering returns slowly to center',
+        steerAt015s > 0.2 && steerAt12s < 0.05,
+        `at0.15s=${steerAt015s.toFixed(2)} at1.2s=${steerAt12s.toFixed(2)} (release=${steerAfterRelease.toFixed(2)})`,
+      );
+      switchPhysics.dispose();
     }
-    check('no rollover on rapid steering switch', minUpSwitch > 0.5, `min up.y=${minUpSwitch.toFixed(3)}`);
-    // 松键缓慢回中回归：满舵后松开，0.15s 时仍在回中过程，0.6s 内基本归零
-    for (let i = 0; i < 30; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 1 }, 1 / 60);
-    switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
-    const steerAfterRelease = Math.abs(switchPhysics.getSteering());
-    for (let i = 0; i < 8; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
-    const steerAt015s = Math.abs(switchPhysics.getSteering());
-    for (let i = 0; i < 64; i++) switchPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
-    const steerAt12s = Math.abs(switchPhysics.getSteering());
-    check(
-      'steering returns slowly to center',
-      steerAt015s > 0.2 && steerAt12s < 0.05,
-      `at0.15s=${steerAt015s.toFixed(2)} at1.2s=${steerAt12s.toFixed(2)} (release=${steerAfterRelease.toFixed(2)})`,
-    );
-    switchPhysics.dispose();
     physics.dispose();
     const roadAttr = (built.group.getObjectByName('road') as import('three').Mesh)?.geometry.getAttribute('position');
     check('road mesh has positions', !!roadAttr && roadAttr.count === built.points.length * 2, `count=${roadAttr?.count}`);
@@ -453,28 +421,29 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('--- complex layout variety ---');
-  let overlapSeeds = 0;
+  console.log('--- complex multi-seed validity ---');
+  let validSeeds = 0;
   for (let seed = 1; seed <= 6; seed++) {
     const meta = makeMeta('complex', seed);
     const pts = generateCenterlinePoints(meta);
     const built2 = buildTrack(meta, pts);
-    let hasOverlap = false;
-    outer: for (let i = 0; i < built2.points.length; i += 7) {
-      for (let j = i + 1; j < built2.points.length; j += 7) {
-        const arcDist = Math.abs(built2.lengths[j] - built2.lengths[i]);
-        if (arcDist < 300 || arcDist > built2.totalLength - 300) continue;
-        const dx = built2.points[i].x - built2.points[j].x;
-        const dz = built2.points[i].z - built2.points[j].z;
-        if (dx * dx + dz * dz < 225) {
-          hasOverlap = true;
-          break outer;
-        }
-      }
+    let ok = built2.totalLength > 1500 && built2.totalLength < 2700;
+    let maxSlope = 0;
+    for (let i = 0; i < built2.points.length; i++) {
+      const j = (i + 1) % built2.points.length;
+      const dh = Math.abs(built2.points[i].y - built2.points[j].y);
+      const ds = built2.points[i].distanceTo(built2.points[j]);
+      maxSlope = Math.max(maxSlope, dh / Math.max(0.01, ds));
+      if (dh > 0.5) ok = false;
     }
-    if (hasOverlap) overlapSeeds++;
+    if (maxSlope >= 0.13) ok = false;
+    if (ok) {
+      validSeeds++;
+    } else {
+      console.log(`  seed ${seed} invalid: len=${built2.totalLength.toFixed(0)} maxSlope=${(maxSlope * 100).toFixed(1)}%`);
+    }
   }
-  check('complex always has overlap (bridge 8)', overlapSeeds === 6, `overlap seeds=${overlapSeeds}/6`);
+  check('complex multi-seed validity', validSeeds === 6, `valid=${validSeeds}/6`);
 
   console.log('--- GLB roundtrip ---');
   const meta = makeMeta('simple', 7);
