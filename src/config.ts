@@ -52,7 +52,6 @@ export const WRONG_WAY_HOLD_MS = 3000;
 
 export const LEADERBOARD_SIZE = 10;
 
-export const DEFAULT_PLAYER_NAME = '玩家';
 export const DEFAULT_CAR_COLOR = '#e53935';
 
 export const TRACK_VERSION = 1;

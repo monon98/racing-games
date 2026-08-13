@@ -14,6 +14,16 @@ export function randomSeed(): number {
   return Math.floor(Math.random() * 2147483647);
 }
 
+/** 默认玩家名：玩家 + 5 位随机字母数字（去掉易混淆字符） */
+const NAME_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export function randomPlayerName(): string {
+  let s = '';
+  for (let i = 0; i < 5; i++) {
+    s += NAME_CHARS[Math.floor(Math.random() * NAME_CHARS.length)];
+  }
+  return `玩家${s}`;
+}
+
 /** 二维整数哈希 → [0,1) */
 export function hash2(x: number, z: number, seed: number): number {
   let h = seed ^ Math.imul(x | 0, 374761393) ^ Math.imul(z | 0, 668265263);

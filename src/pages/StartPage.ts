@@ -9,7 +9,7 @@ import { TrackPreview } from '../ui/TrackPreview';
 import { showConfirmDialog } from '../ui/confirmDialog';
 import type { TrackMode, TrackPackage } from '../types';
 import { fmtTime } from '../utils/format';
-import { randomSeed } from '../utils/random';
+import { randomPlayerName, randomSeed } from '../utils/random';
 
 const MODE_LABEL: Record<TrackMode, string> = {
   simple: '简单',
@@ -66,6 +66,9 @@ export function mountStartPage(root: HTMLElement): () => void {
           <div id="leaderboard" class="leaderboard">加载中…</div>
         </section>
       </div>
+      <footer class="start-footer">
+        来源：<a href="https://monon98.github.io/racing-games/" target="_blank" rel="noreferrer">monon98.github.io/racing-games</a>
+      </footer>
       <div id="toast" class="toast hidden"></div>
     </div>
   `;
@@ -213,9 +216,10 @@ export function mountStartPage(root: HTMLElement): () => void {
     document.querySelector('#btn-start')!.addEventListener('click', () => {
       const name = nameInput.value.trim();
       if (!name) {
-        nameInput.value = '玩家';
-        savePlayerName('玩家');
-        toast('玩家名称为空，已使用默认名称「玩家」');
+        const defaultName = randomPlayerName();
+        nameInput.value = defaultName;
+        savePlayerName(defaultName);
+        toast(`玩家名称为空，已使用默认名称「${defaultName}」`);
       }
       window.location.hash = '#/game';
     });

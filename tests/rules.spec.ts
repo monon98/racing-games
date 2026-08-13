@@ -1,6 +1,7 @@
 import { describe, it } from 'vitest';
 import { updateLapProgress } from '../src/game/lapProgress';
 import { isWrongWay } from '../src/game/wrongWay';
+import { randomPlayerName } from '../src/utils/random';
 import { check } from './helpers';
 
 describe('lap progress', () => {
@@ -25,5 +26,14 @@ describe('wrong-way detection', () => {
     check('nose backward driving forward is wrong-way', isWrongWay(bwd, tangent, 5));
     check('nose backward reversing is not wrong-way', !isWrongWay(bwd, tangent, -5));
     check('nose backward too slow is not wrong-way', !isWrongWay(bwd, tangent, 1));
+  });
+});
+
+describe('default player name', () => {
+  it('is 玩家 + 5 random alphanumeric chars', () => {
+    for (let i = 0; i < 20; i++) {
+      const name = randomPlayerName();
+      check('player name format', /^玩家[A-Z0-9]{5}$/.test(name), name);
+    }
   });
 });

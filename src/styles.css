@@ -105,6 +105,22 @@ select {
   gap: 20px;
 }
 
+.start-footer {
+  margin-top: 28px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.start-footer a {
+  color: #7fb4ff;
+  text-decoration: none;
+}
+
+.start-footer a:hover {
+  text-decoration: underline;
+}
+
 .panel {
   background: rgb(27 34 44 / 0.72);
   backdrop-filter: blur(8px);

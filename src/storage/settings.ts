@@ -1,5 +1,6 @@
-import { DEFAULT_CAR_COLOR, DEFAULT_PLAYER_NAME } from '../config';
+import { DEFAULT_CAR_COLOR } from '../config';
 import type { PlayerSettings, TrackMode } from '../types';
+import { randomPlayerName } from '../utils/random';
 
 const KEY_NAME = 'racing.playerName';
 const KEY_COLOR = 'racing.carColor';
@@ -23,7 +24,7 @@ function write(key: string, value: string): void {
 
 export function loadSettings(): PlayerSettings {
   return {
-    playerName: read(KEY_NAME)?.trim() || DEFAULT_PLAYER_NAME,
+    playerName: read(KEY_NAME)?.trim() || randomPlayerName(),
     carColor: read(KEY_COLOR) || DEFAULT_CAR_COLOR,
     trackMode: read(KEY_MODE) === 'complex' ? 'complex' : 'simple',
   };

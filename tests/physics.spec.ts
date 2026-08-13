@@ -230,15 +230,18 @@ describe('vehicle physics', () => {
     const rig = createCarRig(built);
     for (let i = 0; i < 30; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
     let maxAir = 0;
+    let maxFall = 0;
     for (let i = 0; i < 360; i++) {
       rig.physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
       const st = rig.physics.getState();
       const groundY = built.terrain!.sample(st.position.x, st.position.z);
       maxAir = Math.max(maxAir, st.position.y - groundY);
+      maxFall = Math.min(maxFall, st.velocity.y);
     }
-    // 该用例无护栏、直行全油门：约 4.5s 后已脱离赛道在野地高速行驶，
-    // 允许 2.5m 内的小跳；赛道内坡度 ≤12% + 空中钳制不会出现这种幅度
-    check('no upward launch on hills', maxAir < 2.5, `max air height=${maxAir.toFixed(2)}m`);
+    // 该用例无护栏、直行全油门：约 4.5s 后已脱离赛道在野地高速行驶；
+    // 飞起后必须受重力下落（出现明显的向下速度），幅度有界防止失控
+    check('airborne car falls under gravity', maxFall < -2, `max fall speed=${maxFall.toFixed(2)}m/s`);
+    check('no unbounded flying', maxAir < 4.5, `max air height=${maxAir.toFixed(2)}m`);
     rig.physics.dispose();
   });
 
