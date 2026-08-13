@@ -399,8 +399,8 @@ function buildBarriers(
     // 护栏段两端各取“该采样点的实际路面边缘”，与加宽后的路面精确对齐
     const rightI = new THREE.Vector3(tangents[a].z, 0, -tangents[a].x).normalize();
     const rightJ = new THREE.Vector3(tangents[b].z, 0, -tangents[b].x).normalize();
-    const offsetI = halfWidths[a] + BARRIER_THICKNESS / 2 + 0.08;
-    const offsetJ = halfWidths[b] + BARRIER_THICKNESS / 2 + 0.08;
+    const offsetI = halfWidths[a] + BARRIER_THICKNESS / 2 + 0.05;
+    const offsetJ = halfWidths[b] + BARRIER_THICKNESS / 2 + 0.05;
 
     for (const side of [-1, 1]) {
       const eIx = points[a].x + rightI.x * offsetI * side;
@@ -436,7 +436,7 @@ function buildBarriers(
   // 弯心两侧各自发一段短护栏（本地切线朝向），避免跨弯心的长段横穿赛道
   const emitLocalSegment = (k: number): void => {
     const right = new THREE.Vector3(tangents[k].z, 0, -tangents[k].x).normalize();
-    const offset = halfWidths[k] + BARRIER_THICKNESS / 2 + 0.08;
+    const offset = halfWidths[k] + BARRIER_THICKNESS / 2 + 0.05;
     const p = points[k];
     const next = points[(k + 1) % n];
     const len = Math.max(1.5, p.distanceTo(next) * 1.3);

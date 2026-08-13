@@ -56,7 +56,7 @@ it('game smoke suite', async () => {
       Math.max(...built.halfWidths) > built.roadWidth / 2 + 0.5,
       `max halfWidth=${Math.max(...built.halfWidths).toFixed(2)}m base=${(built.roadWidth / 2).toFixed(2)}m`,
     );
-    check('barrierHeight = 1.05', Math.abs(built.barrierHeight - 1.05) < 1e-6, String(built.barrierHeight));
+    check('barrierHeight = 1.54', Math.abs(built.barrierHeight - 1.54) < 1e-6, String(built.barrierHeight));
     check('totalLength in [1500, 2700]', built.totalLength > 1500 && built.totalLength < 2700, String(built.totalLength.toFixed(0)));
     if (mode === 'simple') {
       // 新规则：不要求直线，但不能突左突右（相邻采样方向变化小）、不自交
@@ -346,7 +346,7 @@ it('game smoke suite', async () => {
       const reverseTop = -reversePhysics.getState().forwardSpeed;
       check('reverse top speed limited', reverseTop < 8.8, `reverse top speed=${reverseTop.toFixed(2)} m/s`);
       reversePhysics.dispose();
-      // 倒车 + 转向：最高倒车速度应被限制在 10km/h 附近（≤3.2m/s）
+      // 倒车 + 转向：HUD 绝对速度应被限制在 10 m/s（约 36 km/h）附近
       const reverseTurnPhysics = new CarPhysics();
       reverseTurnPhysics.addGround(built.physics.ground);
       reverseTurnPhysics.reset(
@@ -355,8 +355,13 @@ it('game smoke suite', async () => {
       );
       for (let i = 0; i < 30; i++) reverseTurnPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
       for (let i = 0; i < 180; i++) reverseTurnPhysics.update({ throttle: -1, brake: 0, steering: 1 }, 1 / 60);
-      const reverseTurnSpeed = -reverseTurnPhysics.getState().forwardSpeed;
-      check('reverse with steering capped low', reverseTurnSpeed < 3.2, `reverse+turn=${(reverseTurnSpeed * 3.6).toFixed(1)}km/h`);
+      const reverseTurnAbs = reverseTurnPhysics.getState().absoluteSpeed;
+      const reverseTurnFwd = -reverseTurnPhysics.getState().forwardSpeed;
+      check(
+        'reverse with steering caps at 10m/s',
+        reverseTurnAbs > 9 && reverseTurnAbs < 10.8 && reverseTurnFwd < 10.8,
+        `reverse+turn abs=${reverseTurnAbs.toFixed(2)}m/s fwd=${reverseTurnFwd.toFixed(2)}m/s`,
+      );
       reverseTurnPhysics.dispose();
     }
     // 平路 12s 全油门后应在 144~202km/h（发动机限速 200；下坡可超速，故只在平路断言）

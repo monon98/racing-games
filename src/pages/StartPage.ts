@@ -6,6 +6,7 @@ import { buildTrack, generateCenterlinePoints } from '../track/generator';
 import { downloadBlob, exportTrackToBlob, importTrackFromFile } from '../track/gltf';
 import type { BuiltTrack } from '../track/generator';
 import { TrackPreview } from '../ui/TrackPreview';
+import { showConfirmDialog } from '../ui/confirmDialog';
 import type { TrackMode, TrackPackage } from '../types';
 import { fmtTime } from '../utils/format';
 import { randomSeed } from '../utils/random';
@@ -176,7 +177,12 @@ export function mountStartPage(root: HTMLElement): () => void {
   }
 
   async function regenerate(mode: TrackMode): Promise<void> {
-    const ok = window.confirm(`重新生成赛道（${MODE_LABEL[mode]}）将清除当前排行榜，是否继续？`);
+    const ok = await showConfirmDialog({
+      title: '重新生成赛道',
+      message: `将生成“${MODE_LABEL[mode]}”模式的新赛道，并清除当前赛道的排行榜。是否继续？`,
+      confirmText: '重新生成',
+      danger: true,
+    });
     if (!ok) return;
     const pkg = await createNewTrack(mode);
     await replaceActiveTrack(pkg);

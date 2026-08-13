@@ -24,8 +24,8 @@ const MAX_STEER = 0.8;
 const ENGINE_FORCE = 7500;
 const REVERSE_FORCE_RATIO = 0.65;
 const REVERSE_MAX_SPEED = 8; // m/s ≈ 29 km/h
-/** 倒车+转向时最高倒车速度：10 km/h ≈ 2.78 m/s */
-const REVERSE_TURN_MAX_SPEED = 10 / 3.6;
+/** 倒车+转向时最高倒车速度：10 m/s ≈ 36 km/h */
+const REVERSE_TURN_MAX_SPEED = 10;
 const FORWARD_MAX_SPEED = 200 / 3.6; // 200 km/h
 const TURN_MAX_SPEED = 50 / 3.6; // 转向时最高时速 50 km/h
 const BRAKE_FORCE = 55;
@@ -63,8 +63,8 @@ export class CarPhysics {
     this.world.broadphase = new CANNON.SAPBroadphase(this.world);
 
     const chassisShape = new CANNON.Box(
-      // 底盘收窄（防弯角刮地诱发侧翻）、重心低、离地高
-      new CANNON.Vec3(CAR.width / 2 - 0.05, CAR.height * 0.26, CAR.length / 2 - 0.05),
+      // 底盘与车身同宽（护栏判定覆盖整个车身）、重心低、离地高
+      new CANNON.Vec3(CAR.width / 2, CAR.height * 0.26, CAR.length / 2 - 0.05),
     );
     this.chassis = new CANNON.Body({
       mass: 750,
@@ -107,6 +107,16 @@ export class CarPhysics {
     // 轮距略宽于车身，前轮在追尾视角下可见
     const xOffset = CAR.width / 2 + 0.15;
     const yOffset = -0.24;
+    // 轮位碰撞盒：把外露轮子纳入护栏碰撞判定（视觉轮子本身无 cannon 碰撞体）
+    const wheelCollider = new CANNON.Box(new CANNON.Vec3(0.22, 0.42, 0.22));
+    for (const [x, z] of [
+      [-xOffset, zFront],
+      [xOffset, zFront],
+      [-xOffset, zRear],
+      [xOffset, zRear],
+    ]) {
+      this.chassis.addShape(wheelCollider, new CANNON.Vec3(x, yOffset, z));
+    }
     for (const [x, z] of [
       [-xOffset, zFront],
       [xOffset, zFront],
@@ -225,13 +235,19 @@ export class CarPhysics {
       }
     } else if (input.throttle < 0) {
       // 倒车限制：更小的加速力 + 最高倒车速度
-      force = -input.throttle * ENGINE_FORCE * REVERSE_FORCE_RATIO;
+      // 倒车+转向时给满反向动力，让倒车转弯能实际达到 10 m/s 上限
+      const reverseRatio = Math.abs(input.steering) > 0.05 ? 1.0 : REVERSE_FORCE_RATIO;
+      force = -input.throttle * ENGINE_FORCE * reverseRatio;
       const reverseMax = Math.abs(input.steering) > 0.05 ? REVERSE_TURN_MAX_SPEED : REVERSE_MAX_SPEED;
-      if (this.forwardSpeed() < -reverseMax) {
+      if (this.forwardSpeed() < -reverseMax || this.chassis.velocity.length() > reverseMax) {
         force = 0;
       }
     }
-    // 后驱：动力给后轮（前轮起步抓地不足会浪费动力）
+    // 后驱：动力给后轮；倒车+转向时也把动力给前轮，避免原地打转，让倒车转弯能加速到上限
+    if (input.throttle < 0 && Math.abs(input.steering) > 0.05) {
+      this.vehicle.applyEngineForce(force, 0);
+      this.vehicle.applyEngineForce(force, 1);
+    }
     this.vehicle.applyEngineForce(force, 2);
     this.vehicle.applyEngineForce(force, 3);
 
@@ -259,6 +275,14 @@ export class CarPhysics {
     let wheelsOnGround = 0;
     for (const w of this.vehicle.wheelInfos) {
       if (w.isInContact) wheelsOnGround++;
+    }
+    // 倒车+转向的绝对速度钳制（HUD 上限 10 m/s ≈ 36 km/h）
+    if (input.throttle < 0 && Math.abs(input.steering) > 0.05) {
+      const v = this.chassis.velocity;
+      const len = v.length();
+      if (len > REVERSE_TURN_MAX_SPEED) {
+        v.scale(REVERSE_TURN_MAX_SPEED / len, v);
+      }
     }
     if (wheelsOnGround < 4 && this.chassis.velocity.y > MAX_AIR_UPWARD_SPEED) {
       this.chassis.velocity.y = MAX_AIR_UPWARD_SPEED;

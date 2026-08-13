@@ -17,10 +17,11 @@ export const CURVE_WIDEN_STRENGTH = 16;
 /** 弯道加宽最大比例（最急弯处基础宽的 1+该值 倍） */
 export const CURVE_WIDEN_MAX = 0.4;
 
-/** 护栏高度 = 车高 × 该系数（原需求一半；用户后续要求调高，取 0.75） */
-export const BARRIER_HEIGHT_FACTOR = 0.75;
+/** 护栏高度 = 车高 × 该系数（原需求一半；用户后续要求调高，取 1.1 → 1.54m） */
+export const BARRIER_HEIGHT_FACTOR = 1.1;
 
-export const BARRIER_THICKNESS = 0.55;
+/** 护栏厚度（加大碰撞判定范围，防高速穿透） */
+export const BARRIER_THICKNESS = 0.8;
 
 /** 每次重生固定时间惩罚（ms） */
 export const TIME_PENALTY_MS = 3000;
