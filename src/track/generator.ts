@@ -10,6 +10,7 @@ import {
 } from '../config';
 import type { TrackMeta } from '../types';
 import { mulberry32 } from '../utils/random';
+import { buildEnvironment } from './environment';
 
 export interface BuiltTrack {
   meta: TrackMeta;
@@ -124,7 +125,7 @@ function generateSimpleTrack(meta: TrackMeta): THREE.Vector3[] {
 function generateComplexTrack(meta: TrackMeta): THREE.Vector3[] {
   const rng = mulberry32(meta.seed);
   const targetLength = 1800 + rng() * 800; // 1800~2600m 随机
-  const lanes = 2 * (1 + Math.floor(rng() * 3)); // 2 / 4 / 6 条车道（M 行）
+  const lanes = 2 * (2 + Math.floor(rng() * 2)); // 4 / 6 条车道（M 行，避免“两条平行线”）
   const laneGap = 26 + rng() * 8; // 车道间距（发卡弯半径 = gap/2，可行驶）
   const cellLen = 26 + rng() * 8; // 每格沿车道长度（长方体区域）
   // 发卡弯总弧长 = (lanes-1)×π×laneGap（含末段大回环），扣除后再算格子数，让缩放 ≈ 1（坡度不受缩放影响）
@@ -555,6 +556,9 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
   // 复杂赛道为高架桥式：路面自带起伏，地面统一为平地
   group.add(buildGroundVisual(meta.mode, points, null));
 
+  // 环境装饰（树/石头，避开路面）
+  group.add(buildEnvironment(meta, points, halfWidths, Math.max(...halfWidths)));
+
   const { visual: barrierVisual, bodies: barrierBodies } = buildBarriers(points, tangents, halfWidths, barrierHeight);
   for (const b of barrierVisual) group.add(b);
 
@@ -570,6 +574,11 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
   } else {
     const trimesh = new CANNON.Trimesh(positions, indices);
     ground = new CANNON.Body({ mass: 0, shape: trimesh });
+    // 平地面物理：车掉出高架路面时落到地面，而不是无限坠落
+    const flatQuat = new CANNON.Quaternion().setFromEuler(-Math.PI / 2, 0, 0);
+    const flat = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), quaternion: flatQuat });
+    flat.updateAABB();
+    barrierBodies.push(flat);
     const catcherQuat = new CANNON.Quaternion().setFromEuler(-Math.PI / 2, 0, 0);
     const catcher = new CANNON.Body({
       mass: 0,
