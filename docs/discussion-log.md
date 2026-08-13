@@ -124,6 +124,10 @@
 ## 2026-08-14 测试迁移 vitest / 移除 idb
 - 用 **vitest** 替代 `smoke/` 脚本：原冒烟断言迁移到 `tests/game.spec.ts`（`pnpm test`，约 24s 通过）。
 - 移除 **idb** 依赖：`src/storage/db.ts` 改用原生 IndexedDB 包装（`indexedDB.open` + Promise 封装，行为不变）。
+
+## 2026-08-14 逆行检测
+- 修复“赛车反方向跑”：沿赛道反方向行驶（切线反向速度 > 2 m/s）时 HUD 显示闪烁“逆行中，请调头！”；持续 3s 自动重生（计时间/距离惩罚）。
+- 实现：`src/game/Game.ts`（wrongWayTime 计时 + respawn('wrongway')）、`src/ui/hud.ts`（showWrongWay）。
 - M3 范围：环境装饰（树/石头）、音效与光影、多文件 `.gltf+.bin` 导入、vitest/代码分割（见 `docs/roadmap.md`）。
 - 驾驶手感调优参数（发动机力、悬架、转向）集中在 `src/physics/vehicle.ts` 顶部常量，改手感先动那里。
 - 浏览器人工验收清单（持久化、清榜、GLB 往返、重生惩罚、暂停/返回、小地图）见 `docs/progress.md`。

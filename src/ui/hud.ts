@@ -17,6 +17,7 @@ export interface HudRefs {
   minimap: HTMLCanvasElement;
   update(data: HudData): void;
   showPause(paused: boolean): void;
+  showWrongWay(active: boolean): void;
   showResult(result: HudResult): void;
   onBack(cb: () => void): void;
   onRestart(cb: () => void): void;
@@ -31,6 +32,7 @@ export function createHUD(container: HTMLElement): HudRefs {
         <div class="hud-row"><span class="hud-label">速度</span><span id="hud-speed">0 km/h</span></div>
         <div class="hud-row"><span class="hud-label">用时</span><span id="hud-time">00:00.00</span></div>
         <div class="hud-row hud-penalty"><span class="hud-label">惩罚</span><span id="hud-penalty">+0s</span></div>
+        <div id="hud-wrongway" class="hud-wrongway hidden">逆行中，请调头！</div>
       </div>
       <button id="hud-back" class="btn hud-back">返回首页</button>
       <canvas id="hud-minimap" class="hud-minimap" width="230" height="230"></canvas>
@@ -57,6 +59,7 @@ export function createHUD(container: HTMLElement): HudRefs {
   const timeEl = container.querySelector<HTMLElement>('#hud-time')!;
   const penaltyEl = container.querySelector<HTMLElement>('#hud-penalty')!;
   const pauseEl = container.querySelector<HTMLElement>('#pause-overlay')!;
+  const wrongWayEl = container.querySelector<HTMLElement>('#hud-wrongway')!;
   const resultEl = container.querySelector<HTMLElement>('#result-overlay')!;
   const minimap = container.querySelector<HTMLCanvasElement>('#hud-minimap')!;
   const backBtn = container.querySelector<HTMLButtonElement>('#hud-back')!;
@@ -82,6 +85,9 @@ export function createHUD(container: HTMLElement): HudRefs {
     },
     showPause(paused) {
       pauseEl.classList.toggle('hidden', !paused);
+    },
+    showWrongWay(active) {
+      wrongWayEl.classList.toggle('hidden', !active);
     },
     showResult(result) {
       resultTimeEl.textContent = fmtTime(result.lapTimeMs);

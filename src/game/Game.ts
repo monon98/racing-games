@@ -47,6 +47,7 @@ export class Game {
   private completedDistance = 0;
   private offTrackTimer = 0;
   private flipTimer = 0;
+  private wrongWayTime = 0;
   private shake = 0;
   private readonly flashEl: HTMLDivElement;
 
@@ -250,7 +251,7 @@ export class Game {
     return best;
   }
 
-  private respawn(reason: 'flip' | 'offtrack'): void {
+  private respawn(reason: 'flip' | 'offtrack' | 'wrongway'): void {
     if (reason === 'flip') this.flips += 1;
     const state = this.physics.getState();
     const idx = findSafeSpawnIndex(this.track, this.nearestIndex(state.position));
@@ -311,6 +312,22 @@ export class Game {
     // 坠落兜底
     if (pos.y < -8) {
       this.respawn('offtrack');
+      return;
+    }
+
+    // 逆行检测：沿赛道反方向行驶（切线反向速度 > 2 m/s）持续 3s → 警告并重生
+    const tangent = this.track.tangents[idx];
+    const tLen = Math.hypot(tangent.x, tangent.z) || 1;
+    const wrongSpeed = -(state.velocity.x * (tangent.x / tLen) + state.velocity.z * (tangent.z / tLen));
+    if (wrongSpeed > 2) {
+      this.wrongWayTime += dtMs;
+    } else {
+      this.wrongWayTime = 0;
+    }
+    this.hud.showWrongWay(this.wrongWayTime > 0);
+    if (this.wrongWayTime > 3000) {
+      this.wrongWayTime = 0;
+      this.respawn('wrongway');
       return;
     }
 

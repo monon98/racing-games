@@ -325,6 +325,23 @@ select {
   font-size: 13px;
 }
 
+.hud-wrongway {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgb(200 30 30 / 0.75);
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+  animation: wrongway-blink 0.5s steps(2) infinite;
+}
+
+@keyframes wrongway-blink {
+  50% {
+    opacity: 0.45;
+  }
+}
+
 .hud-back {
   position: absolute;
   top: 18px;
