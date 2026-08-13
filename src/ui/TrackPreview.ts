@@ -7,9 +7,13 @@ import type { BuiltTrack } from '../track/generator';
 export interface TrackPreviewOptions {
   /** 自由镜头：OrbitControls（拖动旋转/右键平移/滚轮缩放）；默认 false = 环绕慢转 */
   freeCamera?: boolean;
+  /** 初始视角：'car' 聚焦赛车，'scene' 看整个赛道；默认 'car' */
+  initialView?: 'car' | 'scene';
 }
 
-/** 赛道/赛车 3D 预览：默认环绕相机缓慢旋转，也可开启自由镜头 */
+export type PreviewView = 'car' | 'scene';
+
+/** 赛道/赛车 3D 预览：默认环绕相机缓慢旋转，也可开启自由镜头；支持赛车/整个场景快速切换 */
 export class TrackPreview {
   private readonly container: HTMLElement;
   private readonly renderer: THREE.WebGLRenderer;
@@ -26,12 +30,14 @@ export class TrackPreview {
   private readonly onResize: () => void;
   private readonly freeCamera: boolean;
   private controls: OrbitControls | null = null;
+  private viewMode: PreviewView;
 
   constructor(container: HTMLElement, track: BuiltTrack, carColor: string, options: TrackPreviewOptions = {}) {
     this.container = container;
     this.track = track;
     this.carColor = carColor;
     this.freeCamera = options.freeCamera ?? false;
+    this.viewMode = options.initialView ?? 'car';
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -50,7 +56,7 @@ export class TrackPreview {
     this.frameCamera();
     if (this.freeCamera) {
       this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-      this.controls.target.copy(this.center.clone().add(new THREE.Vector3(0, 2, 0)));
+      this.controls.target.copy(this.center.clone().add(new THREE.Vector3(0, 1, 0)));
       this.controls.enableDamping = true;
       this.controls.dampingFactor = 0.08;
       this.controls.minDistance = 5;
@@ -72,7 +78,7 @@ export class TrackPreview {
     this.rebuildCar();
     this.frameCamera();
     if (this.controls) {
-      this.controls.target.copy(this.center.clone().add(new THREE.Vector3(0, 2, 0)));
+      this.controls.target.copy(this.center.clone().add(new THREE.Vector3(0, 1, 0)));
       this.controls.update();
     }
     this.resize();
@@ -81,6 +87,17 @@ export class TrackPreview {
   setColor(color: string): void {
     this.carColor = color;
     this.rebuildCar();
+  }
+
+  /** 快速切换视角：'car' 聚焦赛车，'scene' 看整个赛道 */
+  setView(view: PreviewView): void {
+    if (this.viewMode === view) return;
+    this.viewMode = view;
+    this.frameCamera();
+    if (this.controls) {
+      this.controls.target.copy(this.center.clone().add(new THREE.Vector3(0, 1, 0)));
+      this.controls.update();
+    }
   }
 
   private rebuildCar(): void {
@@ -98,11 +115,39 @@ export class TrackPreview {
   }
 
   private frameCamera(): void {
-    // 以车为中心取景：车体清晰可见，周围赛道弧线入画
-    const car = this.track.points[0];
-    this.center.set(car.x, car.y, car.z);
-    this.radius = 60;
-    this.height = 38;
+    if (this.viewMode === 'scene') {
+      // 整个赛道俯视取景：按包围盒自适应距离
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const p of this.track.points) {
+        minX = Math.min(minX, p.x);
+        maxX = Math.max(maxX, p.x);
+        minZ = Math.min(minZ, p.z);
+        maxZ = Math.max(maxZ, p.z);
+        minY = Math.min(minY, p.y);
+        maxY = Math.max(maxY, p.y);
+      }
+      this.center.set((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+      const size = Math.max(maxX - minX, maxZ - minZ, 200);
+      this.radius = size * 0.95;
+      this.height = this.radius * 0.6;
+    } else {
+      // 以赛车为中心取景（首页背景预览同款）：车体清晰可见，周围赛道弧线入画
+      const car = this.track.points[0];
+      this.center.set(car.x, car.y, car.z);
+      this.radius = 26;
+      this.height = 16;
+    }
+    this.camera.position.set(
+      this.center.x + Math.sin(this.angle) * this.radius,
+      this.center.y + this.height,
+      this.center.z + Math.cos(this.angle) * this.radius,
+    );
+    this.camera.lookAt(this.center.clone().add(new THREE.Vector3(0, 1, 0)));
   }
 
   private tick(): void {
@@ -111,12 +156,7 @@ export class TrackPreview {
       this.controls.update();
     } else {
       this.angle += dt * 0.07;
-      this.camera.position.set(
-        this.center.x + Math.sin(this.angle) * this.radius,
-        this.height,
-        this.center.z + Math.cos(this.angle) * this.radius,
-      );
-      this.camera.lookAt(this.center.clone().add(new THREE.Vector3(0, 2, 0)));
+      this.frameCamera();
     }
     this.renderer.render(this.scene, this.camera);
   }

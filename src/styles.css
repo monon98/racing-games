@@ -160,6 +160,10 @@ select {
   gap: 12px;
 }
 
+.preview-toolbar .btn {
+  min-width: 92px;
+}
+
 .preview-title {
   color: var(--text-dim);
   font-size: 14px;

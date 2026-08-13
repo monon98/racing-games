@@ -30,7 +30,7 @@ description: 'Implementation guidelines for the three.js racing game in the repo
 直接阅读 `src/car/createCar.ts`、`src/game/Game.ts`、`src/ui/`、`src/pages/`；保持模块边界：模型生成不依赖物理，物理状态由 `CarPhysics` 提供。
 - 小地图（`src/ui/minimap.ts`）：X 轴必须镜像（3D 追尾视角 +X 在屏幕左侧），否则左右转向在小地图上相反。
 - 启动页背景预览：`src/ui/TrackPreview.ts`，重新生成/导入赛道或改色后调用 `setTrack`/`setColor` 同步。
-- 自由镜头预览页：`#/preview`（`src/pages/PreviewPage.ts`），复用 `TrackPreview` 的 `freeCamera` 模式（OrbitControls：拖动旋转 / 右键平移 / 滚轮缩放）。
+- 自由镜头预览页：`#/preview`（`src/pages/PreviewPage.ts`），复用 `TrackPreview` 的 `freeCamera` 模式（OrbitControls：拖动旋转 / 右键平移 / 滚轮缩放）；支持 `setView('car' | 'scene')` 快速切换赛车/整个场景视角，首页背景预览使用 `initialView: 'car'`。
 
 ## Validation
 

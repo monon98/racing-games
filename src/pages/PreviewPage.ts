@@ -14,6 +14,8 @@ export function mountPreviewPage(root: HTMLElement): () => void {
   container.innerHTML = `
     <div class="preview-toolbar">
       <button id="preview-back" class="btn">返回首页</button>
+      <button id="preview-view-car" class="btn">赛车</button>
+      <button id="preview-view-scene" class="btn">整个场景</button>
       <span class="preview-title">赛道 / 赛车预览</span>
     </div>
     <div class="preview-hint">左键拖动：旋转 ｜ 右键拖动：平移 ｜ 滚轮：缩放</div>
@@ -26,6 +28,8 @@ export function mountPreviewPage(root: HTMLElement): () => void {
   container.querySelector('#preview-back')!.addEventListener('click', () => {
     window.location.hash = '#/start';
   });
+  container.querySelector('#preview-view-car')!.addEventListener('click', () => preview?.setView('car'));
+  container.querySelector('#preview-view-scene')!.addEventListener('click', () => preview?.setView('scene'));
 
   void (async () => {
     const settings = loadSettings();
