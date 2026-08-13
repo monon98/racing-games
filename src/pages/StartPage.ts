@@ -65,7 +65,7 @@ export function mountStartPage(root: HTMLElement): () => void {
         </section>
       </div>
       <footer class="start-footer">
-        来源：<a href="https://monon98.github.io/racing-games/" target="_blank" rel="noreferrer">monon98.github.io/racing-games</a>
+        来源：<a href="https://github.com/monon98/racing-games" target="_blank" rel="noreferrer">github.com/monon98/racing-games</a>
       </footer>
       <div id="toast" class="toast hidden"></div>
     </div>
