@@ -287,6 +287,13 @@ export class CarPhysics {
     if (wheelsOnGround < 4 && this.chassis.velocity.y > MAX_AIR_UPWARD_SPEED) {
       this.chassis.velocity.y = MAX_AIR_UPWARD_SPEED;
     }
+    // 四轮全离地（真正飞起）时额外下压力 + 更低上升速度上限，压缩山脊/过顶的滞空时间
+    if (wheelsOnGround === 0) {
+      if (this.chassis.velocity.y > 0.6) {
+        this.chassis.velocity.y = 0.6;
+      }
+      this.chassis.force.y -= 24000; // ≈3.2g 下压力，下个物理步生效
+    }
   }
 
   getState(): VehicleState {

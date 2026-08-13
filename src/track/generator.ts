@@ -123,8 +123,9 @@ function generateSimpleTrack(meta: TrackMeta): THREE.Vector3[] {
 
 const TERRAIN_CELL = 10; // 地形网格格距（m）
 const TERRAIN_MARGIN = 60; // 赛道包围盒外扩（m）
-const TERRAIN_MAX_HEIGHT = 8; // 地形高度范围 0~8m
-const TERRAIN_MAX_DIFF = 1.2; // 相邻地形格最大高差（≈12% 坡度）
+const TERRAIN_MAX_HEIGHT = 14; // 地形高度范围 0~14m（加强高低起伏感）
+const TERRAIN_MAX_DIFF = 1.0; // 相邻地形格最大高差（≈10% 坡度，降低野地/对角坡的飞车）
+const ROAD_TERRAIN_OFFSET = 0.05; // 贴地路面略抬高，避免被地形遮挡（绿色露出）
 
 export interface TerrainData {
   originX: number;
@@ -196,19 +197,30 @@ export function generateTerrain(loop: THREE.Vector3[], seed: number): TerrainDat
     heights.push(row);
   }
 
-  // 强制山丘：选一个靠近赛道的点，保证复杂赛道必然有升降起伏
-  const hillIdx = Math.floor(loop.length * (0.3 + rng() * 0.4));
-  const hx = loop[hillIdx].x;
-  const hz = loop[hillIdx].z;
-  const hillAmp = 4 + rng() * 2;
-  const hillSigma = 70 + rng() * 40;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const x = originX + c * TERRAIN_CELL;
-      const z = originZ + r * TERRAIN_CELL;
-      const d2 = (x - hx) ** 2 + (z - hz) ** 2;
-      const bump = hillAmp * Math.exp(-d2 / (2 * hillSigma * hillSigma));
-      heights[r][c] = Math.max(0, Math.min(TERRAIN_MAX_HEIGHT, heights[r][c] + bump));
+  // 强制多个山丘：沿赛道不同位置隆起，保证复杂赛道有强烈且连续的高低起伏
+  const hills = [
+    {
+      idx: Math.floor(loop.length * (0.2 + rng() * 0.3)),
+      amp: 5 + rng() * 3,
+      sigma: 90 + rng() * 50,
+    },
+    {
+      idx: Math.floor(loop.length * (0.55 + rng() * 0.3)),
+      amp: 4 + rng() * 3,
+      sigma: 100 + rng() * 50,
+    },
+  ];
+  for (const hill of hills) {
+    const hx = loop[hill.idx].x;
+    const hz = loop[hill.idx].z;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const x = originX + c * TERRAIN_CELL;
+        const z = originZ + r * TERRAIN_CELL;
+        const d2 = (x - hx) ** 2 + (z - hz) ** 2;
+        const bump = hill.amp * Math.exp(-d2 / (2 * hill.sigma * hill.sigma));
+        heights[r][c] = Math.max(0, Math.min(TERRAIN_MAX_HEIGHT, heights[r][c] + bump));
+      }
     }
   }
 
@@ -313,9 +325,9 @@ function buildRoadRibbon(
     const lz = p.z - right.z * hw;
     const rx = p.x + right.x * hw;
     const rz = p.z + right.z * hw;
-    // 地形优先：路面两侧边沿跟随地形高度（贴地），避免斜坡上悬浮/埋入
-    const ly = terrain ? terrain.sample(lx, lz) : p.y;
-    const ry = terrain ? terrain.sample(rx, rz) : p.y;
+    // 地形优先：路面两侧边沿跟随地形高度（贴地），并略抬高避免被地形遮挡
+    const ly = terrain ? terrain.sample(lx, lz) + ROAD_TERRAIN_OFFSET : p.y;
+    const ry = terrain ? terrain.sample(rx, rz) + ROAD_TERRAIN_OFFSET : p.y;
     positions.push(lx, ly, lz);
     positions.push(rx, ry, rz);
   }

@@ -10,6 +10,10 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:track": "vitest run tests/track.spec.ts",
+    "test:physics": "vitest run tests/physics.spec.ts",
+    "test:gltf": "vitest run tests/gltf.spec.ts",
+    "test:rules": "vitest run tests/rules.spec.ts",
     "test:watch": "vitest"
   },
   "dependencies": {
