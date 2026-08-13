@@ -5,6 +5,7 @@ export interface HudData {
   elapsedMs: number;
   timePenaltyMs: number;
   distancePenaltyM: number;
+  drift: boolean;
 }
 
 export interface HudResult {
@@ -33,6 +34,7 @@ export function createHUD(container: HTMLElement): HudRefs {
         <div class="hud-row"><span class="hud-label">用时</span><span id="hud-time">00:00.00</span></div>
         <div class="hud-row hud-penalty"><span class="hud-label">惩罚</span><span id="hud-penalty">+0s</span></div>
         <div id="hud-wrongway" class="hud-wrongway hidden">逆行中，请调头！</div>
+        <div id="hud-drift" class="hud-drift hidden">漂移失控中，松开转向恢复</div>
       </div>
       <button id="hud-back" class="btn hud-back">返回首页</button>
       <canvas id="hud-minimap" class="hud-minimap" width="230" height="230"></canvas>
@@ -60,6 +62,7 @@ export function createHUD(container: HTMLElement): HudRefs {
   const penaltyEl = container.querySelector<HTMLElement>('#hud-penalty')!;
   const pauseEl = container.querySelector<HTMLElement>('#pause-overlay')!;
   const wrongWayEl = container.querySelector<HTMLElement>('#hud-wrongway')!;
+  const driftEl = container.querySelector<HTMLElement>('#hud-drift')!;
   const resultEl = container.querySelector<HTMLElement>('#result-overlay')!;
   const minimap = container.querySelector<HTMLCanvasElement>('#hud-minimap')!;
   const backBtn = container.querySelector<HTMLButtonElement>('#hud-back')!;
@@ -75,13 +78,14 @@ export function createHUD(container: HTMLElement): HudRefs {
 
   return {
     minimap,
-    update({ speedKmh, elapsedMs, timePenaltyMs, distancePenaltyM }) {
+    update({ speedKmh, elapsedMs, timePenaltyMs, distancePenaltyM, drift }) {
       speedEl.textContent = `${Math.round(speedKmh)} km/h`;
       timeEl.textContent = fmtTime(elapsedMs);
       const parts: string[] = [];
       if (timePenaltyMs > 0) parts.push(`+${(timePenaltyMs / 1000).toFixed(1)}s`);
       if (distancePenaltyM > 0.5) parts.push(`距离 -${distancePenaltyM.toFixed(1)}m`);
       penaltyEl.textContent = parts.length ? parts.join('  ') : '+0s';
+      driftEl.classList.toggle('hidden', !drift);
     },
     showPause(paused) {
       pauseEl.classList.toggle('hidden', !paused);

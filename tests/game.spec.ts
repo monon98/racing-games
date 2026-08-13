@@ -230,6 +230,20 @@ it('game smoke suite', async () => {
       minUpFullLock = Math.min(minUpFullLock, physics.getState().up.y);
     }
     check('stable at full lock', minUpFullLock > 0.8, `min up.y=${minUpFullLock.toFixed(3)}`);
+    // drift regression: full-lock + throttle -> controlled slide, release steering -> grip restored
+    const driftPhysics = new CarPhysics();
+    driftPhysics.addGround(built.physics.ground);
+    for (const b of built.physics.barriers) driftPhysics.addGround(b);
+    driftPhysics.reset(
+      new CANNON.Vec3(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z),
+      new CANNON.Quaternion(startQuat.x, startQuat.y, startQuat.z, startQuat.w),
+    );
+    for (let i = 0; i < 30; i++) driftPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    for (let i = 0; i < 180; i++) driftPhysics.update({ throttle: 1, brake: 0, steering: 1 }, 1 / 60);
+    check('sustained full-lock with throttle enters drift', driftPhysics.getDrifting());
+    for (let i = 0; i < 30; i++) driftPhysics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    check('drift clears after releasing steering', !driftPhysics.getDrifting());
+    driftPhysics.dispose();
     // 滑行回归：松油门 4s 后速度应明显下降（阻尼 + 发动机制动）
     for (let i = 0; i < 240; i++) {
       physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);

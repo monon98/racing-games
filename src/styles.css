@@ -336,6 +336,17 @@ select {
   animation: wrongway-blink 0.5s steps(2) infinite;
 }
 
+.hud-drift {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgb(255 130 20 / 0.8);
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+  animation: wrongway-blink 0.5s steps(2) infinite;
+}
+
 @keyframes wrongway-blink {
   50% {
     opacity: 0.45;

@@ -49,6 +49,10 @@ export class CarPhysics {
   private readonly barrierIds = new Set<number>();
   private readonly onCollide: (event: { body: CANNON.Body; contact: CANNON.ContactEquation }) => void;
   private steerCurrent = 0;
+  private drift = false;
+  private yawSign = 0;
+  private yawFlips = 0;
+  private yawWindow = 0;
 
   constructor() {
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.81, 0) });
@@ -152,6 +156,34 @@ export class CarPhysics {
       }
     }
 
+    // 抖动 → 漂移：满舵 + 油门时横摆率在 0.6s 内翻转 ≥2 次（第二次抖动），进入可控侧滑/失控，
+    // 降低抓地力避免持续抖动；松开转向后立即恢复。
+    if (Math.abs(input.steering) > 0.5 && input.throttle > 0) {
+      const yawRate = this.chassis.angularVelocity.y;
+      const sig = Math.sign(yawRate);
+      if (sig !== 0 && sig !== this.yawSign) {
+        if (this.yawSign !== 0) {
+          this.yawFlips++;
+          if (this.yawFlips >= 2) this.drift = true;
+        }
+        this.yawSign = sig;
+      }
+      this.yawWindow += dt;
+      if (this.yawWindow > 0.6) {
+        this.yawFlips = 0;
+        this.yawWindow = 0;
+      }
+    } else {
+      this.yawSign = 0;
+      this.yawFlips = 0;
+      this.yawWindow = 0;
+      this.drift = false;
+    }
+    const slip = this.drift ? 2.4 : 3.2;
+    for (const w of this.vehicle.wheelInfos) {
+      w.frictionSlip = slip;
+    }
+
     this.vehicle.setSteeringValue(this.steerCurrent, 0);
     this.vehicle.setSteeringValue(this.steerCurrent, 1);
 
@@ -253,6 +285,10 @@ export class CarPhysics {
 
   getSteering(): number {
     return this.steerCurrent;
+  }
+
+  getDrifting(): boolean {
+    return this.drift;
   }
 
   private forwardSpeed(): number {

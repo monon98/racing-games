@@ -211,6 +211,7 @@ export class Game {
       elapsedMs: performance.now() - this.startTime,
       timePenaltyMs: this.timePenaltyMs,
       distancePenaltyM: this.distancePenaltyM,
+      drift: this.physics.getDrifting(),
     });
     drawMinimap(
       this.hud.minimap,

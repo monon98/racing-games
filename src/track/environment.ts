@@ -14,11 +14,15 @@ export function buildEnvironment(
   const rng = mulberry32(meta.seed ^ 0x5bd1e995);
   const n = points.length;
 
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1 });
-  const leafMats = [0x2f7d32, 0x3e8e41, 0x558b2f].map(
+  const trunkMats = [0x5d3f24, 0x6b4a2b, 0x7a5633].map(
+    (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1 }),
+  );
+  const leafMats = [0x2f7d32, 0x3e8e41, 0x558b2f, 0x33691e].map(
     (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9 }),
   );
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x7d838c, roughness: 0.95 });
+  const rockMats = [0x6f7680, 0x7d838c, 0x8d949c].map(
+    (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.95 }),
+  );
 
   const isClear = (x: number, z: number): boolean => {
     for (let i = 0; i < n; i += 4) {
@@ -44,30 +48,45 @@ export function buildEnvironment(
     const obj = new THREE.Group();
     obj.position.set(x, 0, z);
     obj.rotation.y = rng() * Math.PI * 2;
-    const scale = 0.8 + rng() * 0.7;
     if (isTree) {
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.34, 2.4, 6), trunkMat);
-      trunk.position.y = 1.2;
+      // 树：随机粗细/高低/树冠大小/形状
+      const trunkR = 0.16 + rng() * 0.24;
+      const trunkH = 1.6 + rng() * 3.0;
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(trunkR, trunkR * 1.5, trunkH, 6),
+        trunkMats[Math.floor(rng() * trunkMats.length)],
+      );
+      trunk.position.y = trunkH / 2;
       trunk.castShadow = true;
       obj.add(trunk);
-      const leaf = new THREE.Mesh(
-        new THREE.ConeGeometry(1.7, 3.4, 7),
-        leafMats[Math.floor(rng() * leafMats.length)],
-      );
-      leaf.position.y = 3.4;
-      leaf.castShadow = true;
-      obj.add(leaf);
+      const crownR = 1.0 + rng() * 2.0;
+      const crownH = 2.0 + rng() * 3.0;
+      const leafMat = leafMats[Math.floor(rng() * leafMats.length)];
+      if (rng() < 0.6) {
+        const leaf = new THREE.Mesh(new THREE.ConeGeometry(crownR, crownH, 7), leafMat);
+        leaf.position.y = trunkH + crownH * 0.45;
+        leaf.castShadow = true;
+        obj.add(leaf);
+      } else {
+        const leaf = new THREE.Mesh(new THREE.SphereGeometry(crownR, 8, 6), leafMat);
+        leaf.position.y = trunkH + crownR * 0.7;
+        leaf.scale.y = 0.8;
+        leaf.castShadow = true;
+        obj.add(leaf);
+      }
     } else {
+      // 石头：随机大小/扁度/朝向
+      const rockR = 0.7 + rng() * 2.0;
       const rock = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(1.1, 0),
-        rockMat,
+        new THREE.IcosahedronGeometry(rockR, 0),
+        rockMats[Math.floor(rng() * rockMats.length)],
       );
-      rock.scale.set(1, 0.65, 1);
-      rock.position.y = 0.55;
+      rock.scale.set(1, 0.45 + rng() * 0.55, 1);
+      rock.position.y = rockR * rock.scale.y * 0.6;
+      rock.rotation.set(rng() * 0.3, rng() * Math.PI * 2, rng() * 0.3);
       rock.castShadow = true;
       obj.add(rock);
     }
-    obj.scale.setScalar(scale);
     group.add(obj);
     placed++;
   }
