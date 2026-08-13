@@ -1,5 +1,7 @@
 import { describe, it } from 'vitest';
 import * as CANNON from 'cannon-es';
+import * as THREE from 'three';
+import { CarPhysics, CHASSIS_SPAWN_HEIGHT } from '../src/physics/vehicle';
 import { buildTrackForMode, check, createCarRig, resetRig } from './helpers';
 
 const MODES = ['simple', 'complex'] as const;
@@ -256,6 +258,55 @@ describe('vehicle physics', () => {
     check('airborne car falls under gravity', maxFall < -2, `max fall speed=${maxFall.toFixed(2)}m/s`);
     check('no unbounded flying', maxAir < 4.5, `max air height=${maxAir.toFixed(2)}m`);
     rig.physics.dispose();
+  });
+
+  it('complex: climbs steep slopes with throttle (no rollback, no rear lift)', () => {
+    const built = buildTrackForMode('complex');
+    // 找坡度最大的上坡段
+    let bestIdx = 0;
+    let bestSlope = 0;
+    for (let i = 0; i < built.points.length; i++) {
+      const j = (i + 1) % built.points.length;
+      const dy = built.points[j].y - built.points[i].y;
+      const ds = built.points[i].distanceTo(built.points[j]);
+      const slope = dy / Math.max(0.01, ds);
+      if (slope > bestSlope) {
+        bestSlope = slope;
+        bestIdx = i;
+      }
+    }
+    check('found uphill section', bestSlope > 0.06, `max slope=${(bestSlope * 100).toFixed(1)}%`);
+
+    const physics = new CarPhysics();
+    physics.addGround(built.physics.ground);
+    const p = built.points[bestIdx];
+    const tangent = built.tangents[bestIdx].clone();
+    tangent.y = 0;
+    tangent.normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), tangent);
+    physics.reset(
+      new CANNON.Vec3(p.x, p.y + CHASSIS_SPAWN_HEIGHT, p.z),
+      new CANNON.Quaternion(q.x, q.y, q.z, q.w),
+    );
+    for (let i = 0; i < 30; i++) physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    let minUp = 1;
+    let maxBack = 0;
+    let wheelsAt1s = 0;
+    const vehicle = (physics as unknown as { vehicle: CANNON.RaycastVehicle }).vehicle;
+    for (let i = 0; i < 180; i++) {
+      physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+      const st = physics.getState();
+      minUp = Math.min(minUp, st.up.y);
+      maxBack = Math.max(maxBack, -st.forwardSpeed);
+      if (i === 59) wheelsAt1s = vehicle.numWheelsOnGround;
+    }
+    const finalSpeed = physics.getState().forwardSpeed;
+    check('accelerates uphill (no rollback)', finalSpeed > 3, `speed=${finalSpeed.toFixed(2)} m/s, maxBack=${maxBack.toFixed(2)}`);
+    check('no backward roll on uphill', maxBack < 1.0, `maxBack=${maxBack.toFixed(2)} m/s`);
+    check('no flip on uphill', minUp > 0.7, `min up.y=${minUp.toFixed(3)}`);
+    // 冲过坡顶后自然飞起不算问题；断言爬坡中段（1s）轮子仍着地
+    check('wheels stay on ground while climbing', wheelsAt1s >= 3, `wheels=${wheelsAt1s}`);
+    physics.dispose();
   });
 
   it('simple: rapid steering switch does not roll over and returns slowly', () => {

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CAR } from '../config';
 import { buildCar } from '../car/createCar';
 import { CHASSIS_SPAWN_HEIGHT } from '../physics/vehicle';
 import type { BuiltTrack } from '../track/generator';
@@ -104,13 +105,20 @@ export class TrackPreview {
     if (this.carGroup) {
       this.scene.remove(this.carGroup);
     }
-    this.carGroup = buildCar(this.carColor).group;
+    const car = buildCar(this.carColor);
+    this.carGroup = car.group;
     const start = this.track.points[0];
     const tangent = this.track.tangents[0].clone();
     tangent.y = 0;
     tangent.normalize();
     this.carGroup.position.set(start.x, start.y + CHASSIS_SPAWN_HEIGHT, start.z);
     this.carGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tangent);
+    // 静态预览没有物理同步：把轮子放到贴地位置（轮心 = 车体原点高度 - 轮半径），
+    // 否则轮子会悬在车身上方，看起来“四轮朝天”
+    const wheelLocalY = CAR.wheelRadius - CHASSIS_SPAWN_HEIGHT;
+    for (const wheel of car.wheels) {
+      wheel.position.y = wheelLocalY;
+    }
     this.scene.add(this.carGroup);
   }
 

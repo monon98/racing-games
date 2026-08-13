@@ -220,10 +220,21 @@ export class CarPhysics {
         const taper = Math.max(0, 1 - (fwdSpeed - TURN_MAX_SPEED * 0.9) / (TURN_MAX_SPEED * 0.1));
         force *= taper;
       }
-      // 防抬头后翻：PD 反扭矩（等效“防抬头杠”），把车头压回，不损失动力
+      // 防抬头后翻：PD 反扭矩（等效“防抬头杠”），把车头压回，不损失动力。
+      // 俯仰角必须相对“地面法线”计算：把接触轮子的地形法线平均作为地面朝向，
+      // 否则爬坡时正常的车身俯仰会被当成抬头，猛压车头导致后轮离地、无法爬坡甚至翻车。
+      const groundNormal = new CANNON.Vec3(0, 1, 0);
+      let groundCount = 0;
+      for (const w of this.vehicle.wheelInfos) {
+        if (w.isInContact && w.raycastResult.hitNormalWorld) {
+          groundNormal.vadd(w.raycastResult.hitNormalWorld, groundNormal);
+          groundCount++;
+        }
+      }
+      if (groundCount > 0) groundNormal.normalize();
       const up = new CANNON.Vec3(0, 1, 0);
       this.chassis.quaternion.vmult(up, up);
-      const pitch = Math.acos(Math.max(-1, Math.min(1, up.y)));
+      const pitch = Math.acos(Math.max(-1, Math.min(1, up.dot(groundNormal))));
       if (pitch > 0.04) {
         const right = new CANNON.Vec3(1, 0, 0);
         this.chassis.quaternion.vmult(right, right);

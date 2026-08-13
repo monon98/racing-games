@@ -31,6 +31,7 @@ description: 'Implementation guidelines for the three.js racing game in the repo
 - 小地图（`src/ui/minimap.ts`）：X 轴必须镜像（3D 追尾视角 +X 在屏幕左侧），否则左右转向在小地图上相反。
 - 启动页背景预览：`src/ui/TrackPreview.ts`，重新生成/导入赛道或改色后调用 `setTrack`/`setColor` 同步。
 - 自由镜头预览页：`#/preview`（`src/pages/PreviewPage.ts`），复用 `TrackPreview` 的 `freeCamera` 模式（OrbitControls：拖动旋转 / 右键平移 / 滚轮缩放）；支持 `setView('car' | 'scene')` 快速切换赛车/整个场景视角，首页背景预览使用 `initialView: 'car'`。
+- 静态预览（无物理同步）时 `TrackPreview` 会把轮子放到贴地位置（`wheelRadius - CHASSIS_SPAWN_HEIGHT`），避免轮子悬在车身上方。
 
 ## Validation
 
