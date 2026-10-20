@@ -24,14 +24,14 @@ describe('track generation', () => {
     const built = buildTrackForMode('simple');
     const points = built.points;
     check('centerline length 1200~2400', points.length > 1200 && points.length < 2400, String(points.length));
-    check('wheelRadius = 0.45', CAR.wheelRadius === 0.45, String(CAR.wheelRadius));
+    check('wheelRadius = 0.4', CAR.wheelRadius === 0.4, String(CAR.wheelRadius));
     check('roadWidth = 12.0', Math.abs(built.roadWidth - 12.0) < 1e-6, String(built.roadWidth));
     check(
       'curves wider than base',
       Math.max(...built.halfWidths) > built.roadWidth / 2 + 0.5,
       `max halfWidth=${Math.max(...built.halfWidths).toFixed(2)}m base=${(built.roadWidth / 2).toFixed(2)}m`,
     );
-    check('barrierHeight = 1.54', Math.abs(built.barrierHeight - 1.54) < 1e-6, String(built.barrierHeight));
+    check('barrierHeight = 1.32', Math.abs(built.barrierHeight - 1.32) < 1e-6, String(built.barrierHeight));
     check('totalLength in [1500, 2700]', built.totalLength > 1500 && built.totalLength < 2700, String(built.totalLength.toFixed(0)));
     // 新规则：不要求直线，但不能突左突右（相邻采样方向变化小）、不自交
     check('simple no zigzag', maxHeadingTurn(points, built.tangents) < 0.3, `max turn=${maxHeadingTurn(points, built.tangents).toFixed(3)}rad`);

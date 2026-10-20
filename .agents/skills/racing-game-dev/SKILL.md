@@ -13,7 +13,7 @@ description: 'Implementation guidelines for the three.js racing game in the repo
 
 - 包管理一律用 `pnpm`；验证命令 `pnpm typecheck` 与 `pnpm build` 必须通过。
 - TypeScript `strict`；公共数据类型集中在 `src/types.ts`；游戏常量集中在 `src/config.ts`，改动前先查。
-- 尺寸比例固定：车宽 2.0m、车高 1.4m、赛道基础宽 = 6 × 车宽（12.0m），弯道按曲率最多再加宽 40%，护栏高 = 1.1 × 车高（1.54m），1 单位 = 1m。
+- 尺寸比例固定：车宽 1.7m、车高 1.2m、车长 3.6m（2026-10-20 整车缩小，原 2.0/1.4/4.2），赛道基础宽保持 12.0m（`ROAD_WIDTH_MULTIPLIER = 12/1.7`），弯道按曲率最多再加宽 40%，护栏高 = 1.1 × 车高（1.32m），1 单位 = 1m。
 - 单活动赛道：IndexedDB 只存一条，重新生成/导入会清除旧排行榜；排行榜为单圈计时升序前 10。
 - 汽车与赛道必须代码生成；汽车同一模型函数只接受颜色参数。
 - 每个里程碑完成后更新 `docs/progress.md`；需求变化先更新 `docs/requirements.md`。
@@ -28,6 +28,7 @@ description: 'Implementation guidelines for the three.js racing game in the repo
 
 ### 汽车模型 / 相机 / HUD / 页面
 直接阅读 `src/car/createCar.ts`、`src/game/Game.ts`、`src/ui/`、`src/pages/`；保持模块边界：模型生成不依赖物理，物理状态由 `CarPhysics` 提供。
+- 汽车碰撞判定为整车单一碰撞盒（`src/physics/vehicle.ts`：底盘 Box 与车身同宽，无轮位附加碰撞盒）；撞护栏立即回弹（0.35 × 法向冲击，最低 0.8m/s）并整体保留 80% 速度（`COLLISION_BOUNCE` / `COLLISION_SPEED_RETAIN`）。
 - 小地图（`src/ui/minimap.ts`）：X 轴必须镜像（3D 追尾视角 +X 在屏幕左侧），否则左右转向在小地图上相反。
 - 启动页背景预览：`src/ui/TrackPreview.ts`，重新生成/导入赛道或改色后调用 `setTrack`/`setColor` 同步。
 - 自由镜头预览页：`#/preview`（`src/pages/PreviewPage.ts`），复用 `TrackPreview` 的 `freeCamera` 模式（OrbitControls：拖动旋转 / 右键平移 / 滚轮缩放）；支持 `setView('car' | 'scene')` 快速切换赛车/整个场景视角，首页背景预览使用 `initialView: 'car'`。

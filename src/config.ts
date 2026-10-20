@@ -1,15 +1,15 @@
 // 全局游戏常量：所有尺寸/规则调整先改这里
 
-/** 汽车尺寸（1 单位 = 1m） */
+/** 汽车尺寸（1 单位 = 1m）。2026-10-20 用户要求整车缩小以简化碰撞模型（原 2.0×1.4×4.2） */
 export const CAR = {
-  width: 2.0,
-  height: 1.4,
-  length: 4.2,
-  wheelRadius: 0.45,
+  width: 1.7,
+  height: 1.2,
+  length: 3.6,
+  wheelRadius: 0.4,
 } as const;
 
-/** 赛道基础宽 = 车宽 × 该系数（原需求 3~4 个车身；用户后续要求加宽，先 5 倍再 6 倍） */
-export const ROAD_WIDTH_MULTIPLIER = 6.0;
+/** 赛道基础宽 = 车宽 × 该系数（保持基础宽 12m：12 / 1.7；历史为 3.5 → 5 → 6 × 2.0m 车宽） */
+export const ROAD_WIDTH_MULTIPLIER = 120 / 17;
 
 /** 弯道加宽：曲率(rad/m) × 该系数 = 宽度增量比例（封顶见下） */
 export const CURVE_WIDEN_STRENGTH = 16;
@@ -17,7 +17,7 @@ export const CURVE_WIDEN_STRENGTH = 16;
 /** 弯道加宽最大比例（最急弯处基础宽的 1+该值 倍） */
 export const CURVE_WIDEN_MAX = 0.4;
 
-/** 护栏高度 = 车高 × 该系数（原需求一半；用户后续要求调高，取 1.1 → 1.54m） */
+/** 护栏高度 = 车高 × 该系数（原需求一半；用户后续要求调高，取 1.1 → 1.54m；车缩小后 1.32m） */
 export const BARRIER_HEIGHT_FACTOR = 1.1;
 
 /** 护栏厚度（加大碰撞判定范围，防高速穿透） */

@@ -196,3 +196,10 @@
 - README 陈旧项修正：“双页面” → 三页面（含 `#/preview` 预览页）；复杂赛道描述由旧“八字/lemniscate + 海拔区段”改为“地形优先（高度图 0~14m + 道路走廊找平）”；护栏高 0.75 倍车高 → 1.1 倍（1.54m）；玩法补逆行判定与预览页操作；测试数量改为 34 用例（`it.each` 双模式参数化）/ 约 66 项断言；项目结构补 `game/` 且页面列表含预览页。
 - `AGENTS.md` 架构清单补充 `src/game/` 与 `src/utils/`（与实际目录一致）。
 - 其余文档（requirements / progress / roadmap / tech-stack / known-issues / discussion-log）与技能 references 已逐项核对，随最近提交同步，无需改动。
+
+## 2026-10-20 碰撞立即回弹减速 / 整车缩小与单一碰撞盒
+- 碰撞手感（用户要求一）：撞护栏后**立即回弹并适当减速**。实现：`onCollide` 在 step 中记录最强护栏接触（`contact.ni` 统一取从护栏指向车身的方向），step 后统一施加——法向分量重置为向外反弹速度 `max(0.35 × 冲击速度, 0.8 m/s)`，整体速度再保留 80%（`src/physics/vehicle.ts` 新常量 `COLLISION_BOUNCE=0.35`、`COLLISION_SPEED_RETAIN=0.8`、`COLLISION_MIN_IMPACT=1.2`）；低于 1.2m/s 的贴墙低速接触不回弹，避免持续抖动。`reset()` 清空待处理接触。
+- 整车模型（用户要求二）：车辆整体缩小 2.0×1.4×4.2 → **1.7×1.2×3.6m**、轮径 0.45→**0.4**（`src/config.ts` 的 `CAR`），视觉细节（车高/灯/胎宽）同步微调；**删除 4 个轮位碰撞盒**，碰撞判定改为整车单一底盘 Box（以小车为一个完整模型判断）。
+- 尺寸联动：赛道基础宽保持 12m → `ROAD_WIDTH_MULTIPLIER = 12/1.7`；护栏高 = 1.1 × 车高 = **1.32m**；`CHASSIS_SPAWN_HEIGHT` 1.1 → **1.05**（0.24 + 0.38 + 0.4 + 落差）；`TrackPreview` 静态轮位公式不变自适应。
+- 爬坡测试适配：车身缩短后更早冲出最陡段、过脊弹跳进入 1s 快照（前轮悬架伸长无接触属正常飞起）；断言从"固定 i=59 快照 ≥3 轮"改为"爬坡启动段前 50 帧 ≥3 轮着地占比 ≥70%"，翻车/后溜/加速断言不变（`tests/physics.spec.ts`）。诊断方式：临时 spec 打印四轮 `isInContact/suspensionLength` + 俯仰/垂直速度，确认 1s 处前轮无接触为过脊弹跳而非爬坡失败。
+- 测试同步：`track.spec.ts` 断言 wheelRadius=0.4、barrierHeight=1.32（roadWidth 12m 不变）。

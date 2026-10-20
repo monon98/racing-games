@@ -37,8 +37,14 @@ const MAX_AIR_UPWARD_SPEED = 2.0;
 /** 松左右键后轮子回中速度（慢）；按住转向时响应速度（快） */
 const STEER_RETURN_RATE = 3;
 const STEER_APPLY_RATE = 7;
-/** 底盘原点在静止时的离地高度（|连接点y| + 悬架静止长 + 轮半径），重生/出生用 */
-export const CHASSIS_SPAWN_HEIGHT = 1.1;
+/** 底盘原点在静止时的离地高度（|连接点y| 0.24 + 悬架静止长 0.38 + 轮半径 0.4 = 1.02，+0.03 落差），重生/出生用 */
+export const CHASSIS_SPAWN_HEIGHT = 1.05;
+/** 碰撞回弹：撞护栏后沿接触法线立即反弹的比例（restitution） */
+const COLLISION_BOUNCE = 0.35;
+/** 碰撞减速：碰撞后整体速度保留比例（固定减速 20%） */
+const COLLISION_SPEED_RETAIN = 0.8;
+/** 低于该法向冲击速度（m/s）不主动回弹（贴墙低速接触不抖动） */
+const COLLISION_MIN_IMPACT = 1.2;
 
 /** cannon-es 四轮车辆（RaycastVehicle 悬架） */
 export class CarPhysics {
@@ -52,6 +58,8 @@ export class CarPhysics {
   private readonly vehicle: CANNON.RaycastVehicle;
   private readonly barrierIds = new Set<number>();
   private readonly onCollide: (event: { body: CANNON.Body; contact: CANNON.ContactEquation }) => void;
+  /** 本步内最强的一次护栏接触（在 step 后统一施加回弹） */
+  private barrierHit: { body: CANNON.Body; normal: CANNON.Vec3; impact: number } | null = null;
   private steerCurrent = 0;
   private drift = false;
   private yawSign = 0;
@@ -62,8 +70,9 @@ export class CarPhysics {
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.81, 0) });
     this.world.broadphase = new CANNON.SAPBroadphase(this.world);
 
+    // 整车单一碰撞盒（2026-10-20 用户要求：以小车为一个完整模型判断碰撞，不再有轮位附加碰撞盒）
+    // 底盘与车身同宽、覆盖全车；重心低、离地高
     const chassisShape = new CANNON.Box(
-      // 底盘与车身同宽（护栏判定覆盖整个车身）、重心低、离地高
       new CANNON.Vec3(CAR.width / 2, CAR.height * 0.26, CAR.length / 2 - 0.05),
     );
     this.chassis = new CANNON.Body({
@@ -107,16 +116,6 @@ export class CarPhysics {
     // 轮距略宽于车身，前轮在追尾视角下可见
     const xOffset = CAR.width / 2 + 0.15;
     const yOffset = -0.24;
-    // 轮位碰撞盒：把外露轮子纳入护栏碰撞判定（视觉轮子本身无 cannon 碰撞体）
-    const wheelCollider = new CANNON.Box(new CANNON.Vec3(0.22, 0.42, 0.22));
-    for (const [x, z] of [
-      [-xOffset, zFront],
-      [xOffset, zFront],
-      [-xOffset, zRear],
-      [xOffset, zRear],
-    ]) {
-      this.chassis.addShape(wheelCollider, new CANNON.Vec3(x, yOffset, z));
-    }
     for (const [x, z] of [
       [-xOffset, zFront],
       [xOffset, zFront],
@@ -136,6 +135,14 @@ export class CarPhysics {
       const impact = Math.abs(event.contact?.getImpactVelocityAlongNormal?.() ?? 0);
       if (impact > 0) {
         this.onBarrierCollide?.(impact);
+        // 记录最强冲击，step 后统一施加“立即回弹 + 适当减速”（见 update 尾部）
+        if (!this.barrierHit || impact > this.barrierHit.impact) {
+          // 接触法线 ni 统一取“从障碍指向车身”的方向：若反向则翻转
+          const n = event.contact.ni.clone();
+          const away = this.chassis.position.vsub(event.body.position);
+          if (away.length() > 0 && n.dot(away) < 0) n.negate(n);
+          this.barrierHit = { body: event.body, normal: n, impact };
+        }
       }
     };
     this.chassis.addEventListener('collide', this.onCollide);
@@ -299,6 +306,21 @@ export class CarPhysics {
     if (wheelsOnGround === 0 && this.chassis.velocity.y > MAX_AIR_UPWARD_SPEED) {
       this.chassis.velocity.y = MAX_AIR_UPWARD_SPEED;
     }
+
+    // 碰撞响应：撞护栏后沿接触法线立即回弹，并整体适当减速（避免反弹后仍高速贴墙蹭行）。
+    if (this.barrierHit) {
+      const { normal, impact } = this.barrierHit;
+      this.barrierHit = null;
+      const v = this.chassis.velocity;
+      const vn = v.dot(normal); // < 0 = 速度分量仍朝向护栏
+      if (impact > COLLISION_MIN_IMPACT && vn < 0.5) {
+        // 法向分量重置为向外反弹速度（0.35 × 冲击，最低 0.8m/s），切向保留
+        const rebound = Math.max(COLLISION_BOUNCE * impact, 0.8);
+        v.vsub(normal.clone().scale(vn + rebound), v);
+        // 整体减速：保留原速度的 80%
+        v.scale(COLLISION_SPEED_RETAIN, v);
+      }
+    }
   }
 
   getState(): VehicleState {
@@ -324,6 +346,7 @@ export class CarPhysics {
     this.chassis.quaternion.copy(quaternion);
     this.chassis.velocity.setZero();
     this.chassis.angularVelocity.setZero();
+    this.barrierHit = null;
     for (let i = 0; i < this.vehicle.wheelInfos.length; i++) {
       this.vehicle.updateWheelTransform(i);
     }
