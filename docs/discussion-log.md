@@ -191,3 +191,8 @@
 - 选择“**保证路左右等高**”而非“车自适应变形”（后者需要大幅增加悬架行程，会明显改变操控与稳定性）。
 - 实现：`generateTerrain` 增加**道路走廊找平**（`TERRAIN_FLATTEN_HALF=12m`）：把中心线两侧约 24m 内的地形压成“最近中心线点的高度”，消除侧坡；弯道外侧保留自然缓坡（视觉更自然）。
 - 实测：轮距（±1.15m）处左右高度差从最大约 1.9m 降至 **0.087m**；新增回归断言 `wheel track is level on slopes (<0.15m)`，爬坡测试保持通过。
+
+## 2026-10-20 文档同步（README + AGENTS.md）
+- README 陈旧项修正：“双页面” → 三页面（含 `#/preview` 预览页）；复杂赛道描述由旧“八字/lemniscate + 海拔区段”改为“地形优先（高度图 0~14m + 道路走廊找平）”；护栏高 0.75 倍车高 → 1.1 倍（1.54m）；玩法补逆行判定与预览页操作；测试数量改为 34 用例（`it.each` 双模式参数化）/ 约 66 项断言；项目结构补 `game/` 且页面列表含预览页。
+- `AGENTS.md` 架构清单补充 `src/game/` 与 `src/utils/`（与实际目录一致）。
+- 其余文档（requirements / progress / roadmap / tech-stack / known-issues / discussion-log）与技能 references 已逐项核对，随最近提交同步，无需改动。

@@ -19,6 +19,8 @@
 - `src/physics/`：cannon-es 车辆、碰撞、翻车/脱轨检测、重生惩罚。
 - `src/storage/`：IndexedDB（赛道包 + 排行榜）与 localStorage（玩家名/颜色/模式）。
 - `src/ui/`：HUD、2D 俯视小地图。
+- `src/game/`：游戏主循环（Game）、单圈进度（lapProgress）、逆行判定（wrongWay）。
+- `src/utils/`：格式化与随机工具。
 - `src/pages/`：启动页、游戏页与预览页，hash 路由（`#/start`、`#/game`、`#/preview`）。
 - 常量集中在 `src/config.ts`，改动前先查这里。
 
