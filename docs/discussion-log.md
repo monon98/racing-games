@@ -205,10 +205,17 @@
 - 测试同步：`track.spec.ts` 断言 wheelRadius=0.4、barrierHeight=1.32（roadWidth 12m 不变）。
 
 ## 2026-10-22 轨道预设制：预设轨道成为默认，随机生成归档为自定义
-- 用户决策：之前的随机赛道生成归档为“自定义”模式；主玩法改为**预设轨道固定布局**，先支持一种预设，架构上直接支持多预设扩展。
-- 数据结构：`TrackMode` 扩为 `'preset' | 'simple' | 'complex'`；`TrackMeta` 新增 `presetId: string | null`（随 GLB `meta.presetId` 往返；旧文件/旧存档兼容，导入缺省回退）。
+- 用户决策：之前的随机赛道生成归档为“自定义”模式；主玩法改为**预设轨道固定布局**，先支持一种预设，架构上直接支持多预设扩展。- 数据结构：`TrackMode` 扩为 `'preset' | 'simple' | 'complex'`；`TrackMeta` 新增 `presetId: string | null`（随 GLB `meta.presetId` 往返；旧文件/旧存档兼容，导入缺省回退）。
 - 新模块 `src/track/presets.ts`：`PresetTrack` 接口 + `PRESET_TRACKS` 数组（首发「极光环道」aurora-ring，16 个控制点、目标 1800m、固定 seed 20260）+ `getPresetTrack`（无效 ID 回退第一个）+ `samplePresetCenterline`（Catmull-Rom 0.6 与简单模式同参）。
 - 生成器：`generatePresetTrack` = 采样 → `scaleLoop` 到预设长度 → 自交即抛错（预设数据错误显式失败，不静默换形）；`buildTrack` 中 preset 走 simple 的平地管线（`meta.mode !== 'complex'`）。
 - 启动页：模式下拉改“预设赛道（固定布局）/ 自定义 · 简单 / 自定义 · 复杂”，preset 模式显示预设下拉（数据驱动，后续加预设自动出现）；预设模式 seed 使用 `preset.seed`（环境稳定）；localStorage 新增 `racing.trackPreset`（默认极光环道）。
 - 测试：新增预设用例（两次构建逐点一致/长度 1800±30/不自交/平地/路宽 12m/护栏存在；centerline 输入恒等 + 无效 presetId 回退）；spawn 安全点测试覆盖 preset；共 35 用例 / 74 断言。
 - 文档与 skill 同步：README / AGENTS.md / requirements / roadmap / progress / `track-generation.md`（预设节）/ `storage-and-gltf.md`（settings 与 meta 往返）。
+
+## 2026-10-22 本地文件预设
+- 用户决策：保持代码内预设形式不变，**额外**支持把本地 `.glb/.gltf` 文件注册为预设（可以没有本地预设）。
+- 存储：IndexedDB 升 v2，新增 `presets` store（keyPath `id`，单槽位：`saveLocalPreset` 执行 clear+put，重复导入即替换）；入口 `LocalPresetEntry = { id: 'local-<uuid>', fileName, createdAt, pkg }`（`src/types.ts`）。
+- 交互：首页「本地文件预设」按钮 → `importTrackFromFile` 校验 → 注册 → 预设下拉自动追加「本地预设 · <文件名>」（`data-local` 标记，可随时被替换或移除）；与“导入赛道”（直接作为当前赛道使用）并存、语义分离。
+- 激活：预设下拉选中本地项后点「重新生成」→ `activateLocalPreset` 把存档包复制为新 `meta.id` 后 `replaceActiveTrack`（与重新生成一致的清榜语义）；不自动激活，避免误清榜。
+- 兜底：无本地预设时下拉仅显示内置列表；localStorage 残留 `local-*` ID 但条目已被删时回落到第一个内置预设（`syncLocalPresetOption`）；`getPresetTrack` 对 `local-*` 未知 ID 仍回退首内置（生成器级兜底）。
+- 「当前赛道」信息面板对本地预设显示 `预设 · 本地文件`。

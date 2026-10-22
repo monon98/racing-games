@@ -7,6 +7,7 @@
 - preset 模式走**平地管线**：无地形、无限 Plane 地面，与 simple 相同（`buildTrack` 内 `meta.mode !== 'complex'` 判断）。
 - 环境 `meta.seed` 在 preset 模式使用 `preset.seed`（预设外观稳定）；自定义仍为随机种子。
 - 新增预设：`PRESET_TRACKS` 追加条目（id/name/description/length/seed/controls），首页预设下拉数据驱动自动出现；**id 发布后不可更改**（leaderboard/存档/GLB 都引用 presetId）。
+- **本地文件预设**：`#/start` 「本地文件预设」按钮导入 `.glb/.gltf` → `saveLocalPreset` 存 IndexedDB `presets` store（v2 新增，keyPath `id`，单槽位 clear+put）→ 下拉出现「本地预设 · 文件名」（`presetId` 为 `local-` 前缀）。选中后重新生成走 `activateLocalPreset`：复制包为新 id 激活（清榜语义与重新生成一致）。本地预设不存在时内置列表照常工作；存档里残留 `local-*` ID 会回落到第一个内置预设（`syncLocalPresetOption`）。
 
 ## 中心线（自定义随机生成，2026-08-12 从零重做版，用户选定 1C2A3A4B）
 - `generateCenterlinePoints(meta)`：

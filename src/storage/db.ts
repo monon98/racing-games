@@ -1,9 +1,10 @@
 import { LEADERBOARD_SIZE } from '../config';
-import type { LeaderboardEntry, TrackPackage } from '../types';
+import type { LeaderboardEntry, LocalPresetEntry, TrackPackage } from '../types';
 
 const DB_NAME = 'racing-game';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const TRACKS = 'tracks';
+const PRESETS = 'presets';
 const LEADERBOARD = 'leaderboard';
 const ACTIVE_KEY = 'active';
 
@@ -17,6 +18,10 @@ function getDb(): Promise<IDBDatabase> {
         const db = req.result;
         if (!db.objectStoreNames.contains(TRACKS)) {
           db.createObjectStore(TRACKS, { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains(PRESETS)) {
+          // v2 新增：本地文件预设（旧库升级时保留原有两个 store 数据）
+          db.createObjectStore(PRESETS, { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains(LEADERBOARD)) {
           db.createObjectStore(LEADERBOARD, { keyPath: 'trackId' });
@@ -54,6 +59,30 @@ export async function saveActiveTrack(track: TrackPackage): Promise<void> {
   const db = await getDb();
   const tx = db.transaction(TRACKS, 'readwrite');
   tx.objectStore(TRACKS).put({ key: ACTIVE_KEY, ...track });
+  await transactionDone(tx);
+}
+
+/** 本地文件预设：v2 新增 store，可能不存在；单槽位（重复导入整行替换） */
+export async function loadLocalPreset(): Promise<LocalPresetEntry | undefined> {
+  const db = await getDb();
+  const rows = await request(db.transaction(PRESETS).objectStore(PRESETS).getAll());
+  return rows.length > 0 ? (rows[rows.length - 1] as LocalPresetEntry) : undefined;
+}
+
+/** 注册/替换本地文件预设（当前单个槽位，重复导入即整行替换） */
+export async function saveLocalPreset(entry: LocalPresetEntry): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(PRESETS, 'readwrite');
+  tx.objectStore(PRESETS).clear();
+  tx.objectStore(PRESETS).put(entry);
+  await transactionDone(tx);
+}
+
+/** 移除本地文件预设（恢复为仅有内置预设） */
+export async function deleteLocalPreset(): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(PRESETS, 'readwrite');
+  tx.objectStore(PRESETS).clear();
   await transactionDone(tx);
 }
 
