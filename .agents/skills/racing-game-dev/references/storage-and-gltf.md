@@ -1,14 +1,15 @@
 # 存储与 GLTF（storage-and-gltf）
 
 ## IndexedDB（原生封装，`src/storage/db.ts`）
-- 库 `racing-game` **v2**，三个 store：`tracks`（keyPath `key`，活动赛道 key=`active`）、`presets`（v2 新增，keyPath `id`，单槽位本地文件预设）、`leaderboard`（keyPath `trackId`，值为 `{trackId, entries[]}`）。
+- 库 `racing-game` **v3**，两个 store：`tracks`（keyPath `key`，活动赛道 key=`active`）、`leaderboard`（keyPath `trackId`，值为 `{trackId, entries[]}`）。
+  - 版本历史：v2 曾加入 `presets` store（本地文件预设），v3 按用户决策收回（`onupgradeneeded` 里 `deleteObjectStore`）——因为 IndexedDB 不能降版本号打开，只能用更高版本清理。
 - `TrackPackage = { meta, centerline: Point3[], glb: Blob | null }`；单活动赛道约束。
 - `replaceActiveTrack`：覆盖活动赛道并删除旧 trackId 的排行榜（重新生成/切预设/导入即清榜）。
-- 本地文件预设：`loadLocalPreset` / `saveLocalPreset`（clear + put，重复导入替换）/ `deleteLocalPreset`，存 `LocalPresetEntry = { id: 'local-*', fileName, createdAt, pkg }`；激活时复制 `pkg` 为新 `meta.id` 再 `replaceActiveTrack`。
+- 预设赛道为**代码文件定义**（`src/track/presets.ts`），不走数据库存储。
 - `addLeaderboardEntry`：按 `lapTimeMs` 升序、截取前 10。
 
 ## localStorage（`src/storage/settings.ts`）
-- 玩家名 `racing.playerName`（默认“玩家 + 5 位随机字母数字”）、颜色 `racing.carColor`、模式 `racing.trackMode`（`preset`/`simple`/`complex`，**默认 preset**）、预设选择 `racing.trackPreset`（内置 ID 或 `local-*`；本地预设被删时回落第一个内置）。
+- 玩家名 `racing.playerName`（默认“玩家 + 5 位随机字母数字”）、颜色 `racing.carColor`、模式 `racing.trackMode`（`preset`/`simple`/`complex`，**默认 preset**）、预设选择 `racing.trackPreset`（仅内置 `PRESET_TRACKS` ID，非法回落第一个）。
 
 ## GLTF/GLB 往返（`src/track/gltf.ts`）
 - 导出：`GLTFExporter.parseAsync(group, { binary: true })`；赛道数据写入 `group.userData`（type=`racing-game-track`、meta、roadWidth、barrierHeight、centerline），GLTFExporter 会序列化到 extras，GLTFLoader 会还原到 `scene.userData`。

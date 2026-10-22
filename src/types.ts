@@ -38,15 +38,6 @@ export interface PlayerSettings {
   playerName: string;
   carColor: string;
   trackMode: TrackMode;
-  /** 预设模式下选中的预设赛道 ID（内置或本地 `local-*`） */
+  /** 预设模式下选中的预设赛道 ID（来自代码内 PRESET_TRACKS） */
   trackPresetId: string;
-}
-
-/** 本地文件预设：用户导入的赛道文件注册为可选预设（随时可不存在，删除即恢复纯内置列表） */
-export interface LocalPresetEntry {
-  /** `local-` 前缀 + UUID，稳定标识（下拉/GLB 引用） */
-  id: string;
-  fileName: string;
-  createdAt: number;
-  pkg: TrackPackage;
 }

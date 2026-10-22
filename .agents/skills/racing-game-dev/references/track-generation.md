@@ -5,10 +5,9 @@
 ## 赛道来源两类（2026-10-22 预设制改造）
 - **preset（默认）**：官方预设，控制点数据固定在 `src/track/presets.ts`；`generatePresetTrack(meta)` 用 `getPresetTrack(meta.presetId)`（无效 ID 回退第一个预设）→ `samplePresetCenterline`（Catmull-Rom 0.6，间距 1.2m 采样）→ `scaleLoop` 缩放到 `preset.length`；自交则抛错（预设数据错误必须显式失败，不换形状）。相同 presetId 输出逐点一致（确定性测试保证）。
 - preset 模式走**平地管线**：无地形、无限 Plane 地面，与 simple 相同（`buildTrack` 内 `meta.mode !== 'complex'` 判断）。
-- 环境 `meta.seed` 在 preset 模式使用 `preset.seed`（预设外观稳定）；自定义仍为随机种子。
 - 新增预设：`PRESET_TRACKS` 追加条目（id/name/description/length/seed/controls），首页预设下拉数据驱动自动出现；**id 发布后不可更改**（leaderboard/存档/GLB 都引用 presetId）。
-- **本地文件预设**：`#/start` 「本地文件预设」按钮导入 `.glb/.gltf` → `saveLocalPreset` 存 IndexedDB `presets` store（v2 新增，keyPath `id`，单槽位 clear+put）→ 下拉出现「本地预设 · 文件名」（`presetId` 为 `local-` 前缀）。选中后重新生成走 `activateLocalPreset`：复制包为新 id 激活（清榜语义与重新生成一致）。本地预设不存在时内置列表照常工作；存档里残留 `local-*` ID 会回落到第一个内置预设（`syncLocalPresetOption`）。
-
+- 本地文件预设已**收回**（2026-10-22 用户决策）：不提供用户导入预设的 UI 入口；本地预设定为代码文件定义（编辑 `src/track/presets.ts`），IndexedDB `presets` store 已随 DB v3 升级删除。
+- 环境 `meta.seed` 在 preset 模式使用 `preset.seed`（预设外观稳定）；自定义仍为随机种子。
 ## 中心线（自定义随机生成，2026-08-12 从零重做版，用户选定 1C2A3A4B）
 - `generateCenterlinePoints(meta)`：
   - 简单模式：星形随机控制点 + Catmull-Rom 闭环（光滑、不突左突右、不自交，`loopSelfIntersects` 自交重试）；**不要求直线**；长度 1600~2600m 随机，按目标长度采样（间距约 1.2m）后 `scaleLoop` 缩放。

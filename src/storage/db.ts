@@ -1,8 +1,10 @@
 import { LEADERBOARD_SIZE } from '../config';
-import type { LeaderboardEntry, LocalPresetEntry, TrackPackage } from '../types';
+import type { LeaderboardEntry, TrackPackage } from '../types';
 
 const DB_NAME = 'racing-game';
-const DB_VERSION = 2;
+// v2 曾短暂加入 presets store（本地文件预设），随即按用户决策收回改走代码文件；
+// v3 升级时删除该 store（IndexedDB 不允许降版本号，只能用更高版本清理）。
+const DB_VERSION = 3;
 const TRACKS = 'tracks';
 const PRESETS = 'presets';
 const LEADERBOARD = 'leaderboard';
@@ -19,9 +21,8 @@ function getDb(): Promise<IDBDatabase> {
         if (!db.objectStoreNames.contains(TRACKS)) {
           db.createObjectStore(TRACKS, { keyPath: 'key' });
         }
-        if (!db.objectStoreNames.contains(PRESETS)) {
-          // v2 新增：本地文件预设（旧库升级时保留原有两个 store 数据）
-          db.createObjectStore(PRESETS, { keyPath: 'id' });
+        if (db.objectStoreNames.contains(PRESETS)) {
+          db.deleteObjectStore(PRESETS);
         }
         if (!db.objectStoreNames.contains(LEADERBOARD)) {
           db.createObjectStore(LEADERBOARD, { keyPath: 'trackId' });
@@ -59,30 +60,6 @@ export async function saveActiveTrack(track: TrackPackage): Promise<void> {
   const db = await getDb();
   const tx = db.transaction(TRACKS, 'readwrite');
   tx.objectStore(TRACKS).put({ key: ACTIVE_KEY, ...track });
-  await transactionDone(tx);
-}
-
-/** 本地文件预设：v2 新增 store，可能不存在；单槽位（重复导入整行替换） */
-export async function loadLocalPreset(): Promise<LocalPresetEntry | undefined> {
-  const db = await getDb();
-  const rows = await request(db.transaction(PRESETS).objectStore(PRESETS).getAll());
-  return rows.length > 0 ? (rows[rows.length - 1] as LocalPresetEntry) : undefined;
-}
-
-/** 注册/替换本地文件预设（当前单个槽位，重复导入即整行替换） */
-export async function saveLocalPreset(entry: LocalPresetEntry): Promise<void> {
-  const db = await getDb();
-  const tx = db.transaction(PRESETS, 'readwrite');
-  tx.objectStore(PRESETS).clear();
-  tx.objectStore(PRESETS).put(entry);
-  await transactionDone(tx);
-}
-
-/** 移除本地文件预设（恢复为仅有内置预设） */
-export async function deleteLocalPreset(): Promise<void> {
-  const db = await getDb();
-  const tx = db.transaction(PRESETS, 'readwrite');
-  tx.objectStore(PRESETS).clear();
   await transactionDone(tx);
 }
 

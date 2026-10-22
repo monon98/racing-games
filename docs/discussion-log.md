@@ -212,6 +212,15 @@
 - 测试：新增预设用例（两次构建逐点一致/长度 1800±30/不自交/平地/路宽 12m/护栏存在；centerline 输入恒等 + 无效 presetId 回退）；spawn 安全点测试覆盖 preset；共 35 用例 / 74 断言。
 - 文档与 skill 同步：README / AGENTS.md / requirements / roadmap / progress / `track-generation.md`（预设节）/ `storage-and-gltf.md`（settings 与 meta 往返）。
 
+## 2026-10-22 本地文件预设：先加入后收回
+- 用户决策（最终形态）：**取消**「本地文件预设」按钮与用户导入入口；本地预设定为**代码文件定义**（编辑 `src/track/presets.ts`，开发者维护），不对用户暴露 —— 保持预设“来源只有代码数据”的形式统一。
+- 回退实施：
+  - `StartPage.ts`：删除按钮/隐藏 input/`registerLocalPreset`/`activateLocalPreset`/`syncLocalPresetOption`；重新生成恢复为统一 `createNewTrack` 路径；信息面板恢复 `预设 · <名称>`；提示语恢复“重新生成/切换预设会清除当前赛道的排行榜”。
+  - `db.ts`：移除 `presets` store 与 `loadLocalPreset/saveLocalPreset/deleteLocalPreset`；**DB_VERSION 2 → 3**，`onupgradeneeded` 里 `deleteObjectStore('presets')` 清理 v2 遗留（IndexedDB 不能用更小版本号打开，只能升版本清理）。
+  - `types.ts` 删除 `LocalPresetEntry`；`settings.ts` 恢复仅校验内置预设 ID。
+  - skill 与文档同步改回（track-generation / storage-and-gltf / requirements / progress / README）。
+- 教训：`hidden` 属性会被 `.field { display:flex }` 覆盖（本次 council 修复 `.field[hidden]`）；IndexedDB store 的增删必须通过版本升级完成，谨慎规划版本号一次性到位。
+
 ## 2026-10-22 本地文件预设
 - 用户决策：保持代码内预设形式不变，**额外**支持把本地 `.glb/.gltf` 文件注册为预设（可以没有本地预设）。
 - 存储：IndexedDB 升 v2，新增 `presets` store（keyPath `id`，单槽位：`saveLocalPreset` 执行 clear+put，重复导入即替换）；入口 `LocalPresetEntry = { id: 'local-<uuid>', fileName, createdAt, pkg }`（`src/types.ts`）。
