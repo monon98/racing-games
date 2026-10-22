@@ -46,7 +46,7 @@ export function mountStartPage(root: HTMLElement): () => void {
           <h2>当前赛道</h2>
           <div id="track-info" class="track-info">加载中…</div>
           <label class="field">
-            <span>赛道模式（点击重新生成时生效）</span>
+            <span>赛道模式</span>
             <select id="track-mode">
               <option value="preset">预设赛道（固定布局）</option>
               <option value="simple">自定义 · 简单</option>
@@ -54,17 +54,17 @@ export function mountStartPage(root: HTMLElement): () => void {
             </select>
           </label>
           <label class="field" id="preset-field">
-            <span>预设赛道（点击重新生成时生效）</span>
+            <span>预设赛道（立即生效）</span>
             <select id="track-preset"></select>
           </label>
           <div class="track-actions">
-            <button id="btn-regenerate" class="btn">重新生成赛道</button>
+            <button id="btn-regenerate" class="btn" hidden>重新生成赛道</button>
             <button id="btn-preview" class="btn">赛道 / 赛车预览</button>
             <button id="btn-export" class="btn">导出赛道</button>
             <button id="btn-import" class="btn">导入赛道</button>
             <input id="file-import" type="file" accept=".glb,.gltf" hidden />
           </div>
-          <p class="hint">重新生成/切换预设会清除当前赛道的排行榜</p>
+          <p class="hint">切换预设 / 重新生成会清除当前赛道的排行榜</p>
         </section>
 
         <section class="panel">
@@ -229,16 +229,68 @@ export function mountStartPage(root: HTMLElement): () => void {
     return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c));
   }
 
-  async function regenerate(mode: TrackMode, presetId?: string): Promise<void> {
-    const local = mode === 'preset' && presetId?.startsWith('local-')
-      ? localPresets.find((p) => p.id === presetId)
-      : undefined;
+  /** 通用激活流程：分配新 id → 覆盖活动赛道 → 刷新页面 UI（清榜语义） */
+  async function applyTrack(raw: TrackPackage, trackDesc: string): Promise<void> {
+    const pkg: TrackPackage = {
+      meta: { ...raw.meta, id: crypto.randomUUID(), createdAt: Date.now() },
+      centerline: raw.centerline,
+      glb: raw.glb,
+    };
+    await replaceActiveTrack(pkg);
+    current = pkg;
+    currentBuilt = buildTrack(pkg.meta, pkg.centerline.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
+    ensurePreview();
+    renderTrackInfo();
+    await renderLeaderboard();
+    toast(`已切换到${trackDesc}，排行榜已清除`);
+  }
+
+  /** 描述目标赛道（预设 / 本地预设 / 自定义） */
+  function trackDescFor(mode: TrackMode, presetId?: string): string {
+    const local = presetId?.startsWith('local-') ? localPresets.find((p) => p.id === presetId) : undefined;
     const preset = mode === 'preset' ? getPresetTrack(presetId) : null;
-    const trackDesc = local
+    return local
       ? `本地预设「${local.fileName}」`
       : preset
         ? `预设赛道「${preset.name}」`
         : `“${MODE_LABEL[mode]}”模式的自定义赛道`;
+  }
+
+  /** 激活所选预设：确认清榜后生效（预设立即生效，不走重新生成按钮） */
+  async function activatePreset(presetId: string): Promise<void> {
+    if (current?.meta.mode === 'preset' && current.meta.presetId === presetId) {
+      toast('当前已在用该预设赛道');
+      return;
+    }
+    const trackDesc = trackDescFor('preset', presetId);
+    const ok = await showConfirmDialog({
+      title: '切换预设赛道',
+      message: `将切换到${trackDesc}，并清除当前赛道的排行榜。是否继续？`,
+      confirmText: '切换',
+      danger: true,
+    });
+    if (!ok) {
+      // 取消：下拉与存档回退到当前赛道的预设
+      const back = current?.meta.presetId ?? PRESET_TRACKS[0].id;
+      presetSelect.value = back;
+      saveTrackPreset(back);
+      return;
+    }
+    try {
+      const local = localPresets.find((p) => p.id === presetId);
+      // 本地 GLB 预设：从 public/presets 读取并解析；内置预设：控制点生成
+      await applyTrack(local ? await loadLocalPresetTrack(local) : await createNewTrack('preset', presetId), trackDesc);
+    } catch {
+      toast('本地预设加载失败，请确认 public/presets 内为本游戏导出的赛道文件');
+      const back = current?.meta.presetId ?? PRESET_TRACKS[0].id;
+      presetSelect.value = back;
+      saveTrackPreset(back);
+    }
+  }
+
+  /** 自定义模式：确认后重新生成（重新生成按钮仅在自定义模式显示） */
+  async function regenerate(mode: TrackMode): Promise<void> {
+    const trackDesc = trackDescFor(mode);
     const ok = await showConfirmDialog({
       title: '重新生成赛道',
       message: `将生成${trackDesc}，并清除当前赛道的排行榜。是否继续？`,
@@ -246,24 +298,7 @@ export function mountStartPage(root: HTMLElement): () => void {
       danger: true,
     });
     if (!ok) return;
-    try {
-      // 本地 GLB 预设：从 public/presets 读取并解析，分配新 id 激活（清榜语义与重新生成一致）
-      const raw = local ? await loadLocalPresetTrack(local) : await createNewTrack(mode, presetId);
-      const pkg: TrackPackage = {
-        meta: { ...raw.meta, id: crypto.randomUUID(), createdAt: Date.now() },
-        centerline: raw.centerline,
-        glb: raw.glb,
-      };
-      await replaceActiveTrack(pkg);
-      current = pkg;
-      currentBuilt = buildTrack(pkg.meta, pkg.centerline.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
-      ensurePreview();
-      renderTrackInfo();
-      await renderLeaderboard();
-      toast(`已切换到${trackDesc}，排行榜已清除`);
-    } catch {
-      toast('本地预设加载失败，请确认 public/presets 内为本游戏导出的赛道文件');
-    }
+    await applyTrack(await createNewTrack(mode), trackDesc);
   }
 
   function init(): void {
@@ -286,11 +321,20 @@ export function mountStartPage(root: HTMLElement): () => void {
       saveCarColor(colorInput.value);
       preview?.setColor(colorInput.value);
     });
+    const regenBtn = root.querySelector<HTMLButtonElement>('#btn-regenerate')!;
+    regenBtn.hidden = modeSelect.value === 'preset';
     modeSelect.addEventListener('change', () => {
-      saveTrackMode(modeSelect.value as TrackMode);
-      presetField.hidden = modeSelect.value !== 'preset';
+      const nextMode = modeSelect.value as TrackMode;
+      saveTrackMode(nextMode);
+      presetField.hidden = nextMode !== 'preset';
+      // 预设布局固定，无“重新生成”概念；切到预设模式时按当前下拉立即生效
+      regenBtn.hidden = nextMode === 'preset';
+      if (nextMode === 'preset') void activatePreset(presetSelect.value);
     });
-    presetSelect.addEventListener('change', () => saveTrackPreset(presetSelect.value));
+    presetSelect.addEventListener('change', () => {
+      saveTrackPreset(presetSelect.value);
+      if (modeSelect.value === 'preset') void activatePreset(presetSelect.value);
+    });
 
     document.querySelector('#btn-start')!.addEventListener('click', () => {
       const name = nameInput.value.trim();
@@ -307,9 +351,8 @@ export function mountStartPage(root: HTMLElement): () => void {
       window.location.hash = '#/preview';
     });
 
-    document.querySelector('#btn-regenerate')!.addEventListener('click', () => {
-      const mode = modeSelect.value as TrackMode;
-      void regenerate(mode, mode === 'preset' ? presetSelect.value : undefined);
+    regenBtn!.addEventListener('click', () => {
+      void regenerate(modeSelect.value as TrackMode);
     });
 
     document.querySelector('#btn-export')!.addEventListener('click', () => {

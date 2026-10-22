@@ -220,6 +220,7 @@
   - `db.ts`：移除 `presets` store 与 `loadLocalPreset/saveLocalPreset/deleteLocalPreset`；**DB_VERSION 2 → 3**，`onupgradeneeded` 里 `deleteObjectStore('presets')` 清理 v2 遗留（IndexedDB 不能用更小版本号打开，只能升版本清理）。
   - `types.ts` 删除 `LocalPresetEntry`；`settings.ts` 恢复仅校验内置预设 ID。
   - skill 与文档同步改回（track-generation / storage-and-gltf / requirements / progress / README）。
+- 预设模式即时生效（2026-10-22 用户决策）：预设布局固定，无需“重新生成”——**预设模式隐藏「重新生成赛道」按钮**（仅自定义模式显示）；预设下拉选中或切到预设模式立即激活（`activatePreset`：已是该预设则直接提示；清榜前确认，取消/加载失败回退下拉与存档到当前赛道预设）。激活逻辑重构为通用 `applyTrack`（新 id → `replaceActiveTrack` → 刷新 UI）。提示语更新为“切换预设 / 重新生成会清除当前赛道的排行榜”。
 - 教训：`hidden` 属性会被 `.field { display:flex }` 覆盖（本次 council 修复 `.field[hidden]`）；IndexedDB store 的增删必须通过版本升级完成，谨慎规划版本号一次性到位。
 
 ## 2026-10-22 本地文件预设

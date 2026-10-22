@@ -7,6 +7,7 @@
   - [x] 轨道预设制（2026-10-22）：默认官方预设轨道（固定控制点、确定性），随机生成归档为自定义模式；首发预设「极光环道」（约 1.8km 平地环道，16 控制点）；`presetId` 随 GLB 往返；新增预设只需扩 `PRESET_TRACKS`
 - [x] 本地文件预设取消（2026-10-22）：按要求移除「本地文件预设」按钮与 IndexedDB `presets` store（DB v3 删除），本地预设改为代码文件定义（`PRESET_TRACKS` / editor 维护），不对外提供导入入口；预设下拉仅内置列表
 - [x] 本地 GLB 预设改为 public 目录方案（2026-10-22）：`public/presets/` + `index.json` 清单，运行时读取；预设下拉出现「本地预设 · <文件名>」，选中重新生成即激活（新 id 清榜、固定 seed）；目录可为空；新增 `localPresets.ts` 与 `importTrackFromUrl`、ID 派生测试（36 用例）
+- [x] 预设模式即时生效（2026-10-22）：预设布局固定，**预设模式去掉「重新生成赛道」按钮**（仅自定义模式显示）；预设下拉选中 / 切到预设模式即生效（清榜前确认，取消则回退选择），自定义模式保留重新生成按钮
 - [x] 技术栈分析与决策（`docs/tech-stack.md`：Vite 8 + TS 7 strict + three + cannon-es + 原生 IndexedDB + pnpm）
 - [x] M0 规范与工程
   - [x] git 初始化；pnpm 固化（`packageManager` + `.npmrc`）
