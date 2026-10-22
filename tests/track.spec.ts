@@ -104,6 +104,17 @@ describe('track generation', () => {
     check('road mesh has positions', !!roadAttr && roadAttr.count === points.length * 2, `count=${roadAttr?.count}`);
   });
 
+  it('local preset id derives stably from file name', async () => {
+    const { localPresetIdFor } = await import('../src/track/localPresets');
+    check('plain name', localPresetIdFor('classic.glb') === 'local-classic', localPresetIdFor('classic.glb'));
+    check(
+      'non-ascii/space/punct sanitized',
+      localPresetIdFor('Aurora Ring(GLB).gltf') === 'local-Aurora-Ring-GLB',
+      localPresetIdFor('Aurora Ring(GLB).gltf'),
+    );
+    check('cjk stripped (recommend ascii file names)', localPresetIdFor('环道.glb') === 'local-', localPresetIdFor('环道.glb'));
+  });
+
   it('preset track: fixed layout, deterministic, buildable from stored centerline', () => {
     const built = buildTrackForMode('preset', 0, 'aurora-ring');
     // 重建两次，输出必须完全一致（预设=固定布局）

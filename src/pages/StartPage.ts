@@ -4,6 +4,7 @@ import { getLeaderboard, loadActiveTrack, replaceActiveTrack } from '../storage/
 import { loadSettings, saveCarColor, savePlayerName, saveTrackMode, saveTrackPreset } from '../storage/settings';
 import { buildTrack, generateCenterlinePoints } from '../track/generator';
 import { PRESET_TRACKS, getPresetTrack } from '../track/presets';
+import { listLocalPresets, loadLocalPresetTrack, type LocalPresetInfo } from '../track/localPresets';
 import { downloadBlob, exportTrackToBlob, importTrackFromFile } from '../track/gltf';
 import type { BuiltTrack } from '../track/generator';
 import { TrackPreview } from '../ui/TrackPreview';
@@ -122,13 +123,30 @@ export function mountStartPage(root: HTMLElement): () => void {
     };
   }
 
-  /** 本地预设通过代码文件（`src/track/presets.ts` 等）定义，运行期不提供导入入口；
-   *  预设下拉仅需校准存档里残留的本地 ID（已不在内置列表时回落第一个预设） */
+  /** 本地 GLB 预设清单（public/presets/，可为空） */
+  let localPresets: LocalPresetInfo[] = [];
+
+  /** 预设下拉同步：内置 + 本地（data-local），并校准存档 ID（不在列表时回落第一个内置） */
   function syncPresetSelect(): void {
+    presetSelect.querySelectorAll('option[data-local]').forEach((o) => o.remove());
+    for (const info of localPresets) {
+      const opt = document.createElement('option');
+      opt.value = info.id;
+      opt.dataset.local = '1';
+      opt.textContent = `本地预设 · ${info.fileName}`;
+      presetSelect.appendChild(opt);
+    }
     const wanted = loadSettings().trackPresetId;
-    if (!PRESET_TRACKS.some((p) => p.id === wanted)) {
+    const hasWanted =
+      PRESET_TRACKS.some((p) => p.id === wanted) || localPresets.some((p) => p.id === wanted);
+    if (!hasWanted) {
       presetSelect.value = PRESET_TRACKS[0].id;
       if (modeSelect.value === 'preset') saveTrackPreset(presetSelect.value);
+    } else if (presetSelect.value !== wanted) {
+      presetSelect.value = wanted;
+    }
+    if (current?.meta.presetId?.startsWith('local-') && localPresets.some((p) => p.id === current!.meta.presetId)) {
+      presetSelect.value = current.meta.presetId;
     }
   }
 
@@ -139,6 +157,7 @@ export function mountStartPage(root: HTMLElement): () => void {
       current = await createNewTrack(settings.trackMode, settings.trackPresetId);
       await replaceActiveTrack(current);
     }
+    localPresets = await listLocalPresets();
     syncPresetSelect();
     currentBuilt = buildTrack(current.meta, current.centerline.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
     ensurePreview();
@@ -163,7 +182,12 @@ export function mountStartPage(root: HTMLElement): () => void {
     if (!current) return;
     const m = current.meta;
     const date = new Date(m.createdAt).toLocaleString();
-    const modeValue = m.mode === 'preset' ? `预设 · ${getPresetTrack(m.presetId).name}` : MODE_LABEL[m.mode];
+    const modeValue =
+      m.mode === 'preset'
+        ? m.presetId?.startsWith('local-')
+          ? `预设 · 本地(${localPresets.find((p) => p.id === m.presetId)?.fileName ?? '文件'})`
+          : `预设 · ${getPresetTrack(m.presetId).name}`
+        : MODE_LABEL[m.mode];
     trackInfo.innerHTML = `
       <div class="info-line"><span>模式</span><b>${modeValue}</b></div>
       <div class="info-line"><span>种子</span><b>${m.seed}</b></div>
@@ -206,10 +230,15 @@ export function mountStartPage(root: HTMLElement): () => void {
   }
 
   async function regenerate(mode: TrackMode, presetId?: string): Promise<void> {
+    const local = mode === 'preset' && presetId?.startsWith('local-')
+      ? localPresets.find((p) => p.id === presetId)
+      : undefined;
     const preset = mode === 'preset' ? getPresetTrack(presetId) : null;
-    const trackDesc = preset
-      ? `预设赛道「${preset.name}」`
-      : `“${MODE_LABEL[mode]}”模式的自定义赛道`;
+    const trackDesc = local
+      ? `本地预设「${local.fileName}」`
+      : preset
+        ? `预设赛道「${preset.name}」`
+        : `“${MODE_LABEL[mode]}”模式的自定义赛道`;
     const ok = await showConfirmDialog({
       title: '重新生成赛道',
       message: `将生成${trackDesc}，并清除当前赛道的排行榜。是否继续？`,
@@ -217,14 +246,24 @@ export function mountStartPage(root: HTMLElement): () => void {
       danger: true,
     });
     if (!ok) return;
-    const pkg = await createNewTrack(mode, presetId);
-    await replaceActiveTrack(pkg);
-    current = pkg;
-    currentBuilt = buildTrack(pkg.meta, pkg.centerline.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
-    ensurePreview();
-    renderTrackInfo();
-    await renderLeaderboard();
-    toast('已重新生成赛道，排行榜已清除');
+    try {
+      // 本地 GLB 预设：从 public/presets 读取并解析，分配新 id 激活（清榜语义与重新生成一致）
+      const raw = local ? await loadLocalPresetTrack(local) : await createNewTrack(mode, presetId);
+      const pkg: TrackPackage = {
+        meta: { ...raw.meta, id: crypto.randomUUID(), createdAt: Date.now() },
+        centerline: raw.centerline,
+        glb: raw.glb,
+      };
+      await replaceActiveTrack(pkg);
+      current = pkg;
+      currentBuilt = buildTrack(pkg.meta, pkg.centerline.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
+      ensurePreview();
+      renderTrackInfo();
+      await renderLeaderboard();
+      toast(`已切换到${trackDesc}，排行榜已清除`);
+    } catch {
+      toast('本地预设加载失败，请确认 public/presets 内为本游戏导出的赛道文件');
+    }
   }
 
   function init(): void {

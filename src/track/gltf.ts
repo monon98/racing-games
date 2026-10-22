@@ -68,25 +68,44 @@ export async function importTrackFromFile(file: File): Promise<TrackPackage> {
   }
   const url = URL.createObjectURL(file);
   try {
-    const gltf = await new GLTFLoader().loadAsync(url);
-    const ud = extractTrackUserData(gltf.scene);
-    if (ud.type !== TRACK_ASSET_TYPE || !Array.isArray(ud.centerline) || ud.centerline.length < 20) {
-      throw new Error('该文件不是本游戏导出的赛道文件（缺少赛道数据）');
-    }
-    const meta: TrackMeta = {
-      id: crypto.randomUUID(),
-      mode: ud.meta?.mode === 'complex' ? 'complex' : ud.meta?.mode === 'preset' ? 'preset' : 'simple',
-      presetId: typeof ud.meta?.presetId === 'string' ? ud.meta.presetId : null,
-      seed: typeof ud.meta?.seed === 'number' ? ud.meta.seed : randomSeed(),
-      createdAt: Date.now(),
-      version: TRACK_VERSION,
-    };
-    return {
-      meta,
-      centerline: ud.centerline.map((p) => ({ x: p.x, y: p.y, z: p.z })),
-      glb: file,
-    };
+    const pkg = await importTrackFromUrl(url);
+    // 文件导入保留原 GLB（用于再次导出）
+    pkg.glb = file;
+    return pkg;
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/** 校验并从已加载的场景构建赛道包（预设信息可被覆盖，例如本地预设） */
+export function trackPackageFromGltf(
+  gltf: { scene: { userData: unknown } },
+  metaOverride?: Partial<TrackMeta>,
+): TrackPackage {
+  const ud = extractTrackUserData(gltf.scene as never);
+  if (ud.type !== TRACK_ASSET_TYPE || !Array.isArray(ud.centerline) || ud.centerline.length < 20) {
+    throw new Error('该文件不是本游戏导出的赛道文件（缺少赛道数据）');
+  }
+  const mode: TrackMode =
+    ud.meta?.mode === 'complex' ? 'complex' : ud.meta?.mode === 'preset' ? 'preset' : 'simple';
+  const meta: TrackMeta = {
+    id: crypto.randomUUID(),
+    mode,
+    presetId: typeof ud.meta?.presetId === 'string' ? ud.meta.presetId : null,
+    seed: typeof ud.meta?.seed === 'number' ? ud.meta.seed : randomSeed(),
+    createdAt: Date.now(),
+    version: TRACK_VERSION,
+    ...metaOverride,
+  };
+  return {
+    meta,
+    centerline: ud.centerline.map((p) => ({ x: p.x, y: p.y, z: p.z })),
+    glb: null,
+  };
+}
+
+/** 从 URL 加载并校验赛道（公网/相对路径 GLB） */
+export async function importTrackFromUrl(url: string): Promise<TrackPackage> {
+  const gltf = await new GLTFLoader().loadAsync(url);
+  return trackPackageFromGltf(gltf);
 }

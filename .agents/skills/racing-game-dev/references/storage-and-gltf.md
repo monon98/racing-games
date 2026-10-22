@@ -2,7 +2,7 @@
 
 ## IndexedDB（原生封装，`src/storage/db.ts`）
 - 库 `racing-game` **v3**，两个 store：`tracks`（keyPath `key`，活动赛道 key=`active`）、`leaderboard`（keyPath `trackId`，值为 `{trackId, entries[]}`）。
-  - 版本历史：v2 曾加入 `presets` store（本地文件预设），v3 按用户决策收回（`onupgradeneeded` 里 `deleteObjectStore`）——因为 IndexedDB 不能降版本号打开，只能用更高版本清理。
+  - 版本历史：v2 曾加入 `presets` store（本地文件预设），v3 收回。本地 GLB 预设现走 **`public/presets/`**（`localPresets.ts` 运行时 fetch 清单），不进数据库。
 - `TrackPackage = { meta, centerline: Point3[], glb: Blob | null }`；单活动赛道约束。
 - `replaceActiveTrack`：覆盖活动赛道并删除旧 trackId 的排行榜（重新生成/切预设/导入即清榜）。
 - 预设赛道为**代码文件定义**（`src/track/presets.ts`），不走数据库存储。

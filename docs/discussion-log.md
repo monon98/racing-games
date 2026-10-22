@@ -203,6 +203,7 @@
 - 尺寸联动：赛道基础宽保持 12m → `ROAD_WIDTH_MULTIPLIER = 12/1.7`；护栏高 = 1.1 × 车高 = **1.32m**；`CHASSIS_SPAWN_HEIGHT` 1.1 → **1.05**（0.24 + 0.38 + 0.4 + 落差）；`TrackPreview` 静态轮位公式不变自适应。
 - 爬坡测试适配：车身缩短后更早冲出最陡段、过脊弹跳进入 1s 快照（前轮悬架伸长无接触属正常飞起）；断言从"固定 i=59 快照 ≥3 轮"改为"爬坡启动段前 50 帧 ≥3 轮着地占比 ≥70%"，翻车/后溜/加速断言不变（`tests/physics.spec.ts`）。诊断方式：临时 spec 打印四轮 `isInContact/suspensionLength` + 俯仰/垂直速度，确认 1s 处前轮无接触为过脊弹跳而非爬坡失败。
 - 测试同步：`track.spec.ts` 断言 wheelRadius=0.4、barrierHeight=1.32（roadWidth 12m 不变）。
+- 本地 GLB 预设（public 目录方案，2026-10-22 定版）：用户要求“支持本地 glb 文件生成，在 public 目录下子目录”。`public/presets/` + `index.json` 清单（可空）；`src/track/localPresets.ts` 运行时读取清单并加载（`import.meta.env.BASE_URL` 兼容 Pages 子路径）；`gltf.ts` 重构出 `importTrackFromUrl` / `trackPackageFromGltf(metaOverride)`；`localPresetIdFor` 文件名派生稳定 ID（CJK 字符被剥除，建议 ASCII 文件名）；`loadLocalPresetTrack` 覆盖 meta `mode='preset' / presetId='local-*' / seed=0`（环境确定）；StartPage 预设下拉 data-local 项 + 重新生成激活（新 id 清榜），失败 toast 提示；目录/清单缺失 = 仅内置列表；新增 ID 派生单测（36 用例）。
 
 ## 2026-10-22 轨道预设制：预设轨道成为默认，随机生成归档为自定义
 - 用户决策：之前的随机赛道生成归档为“自定义”模式；主玩法改为**预设轨道固定布局**，先支持一种预设，架构上直接支持多预设扩展。- 数据结构：`TrackMode` 扩为 `'preset' | 'simple' | 'complex'`；`TrackMeta` 新增 `presetId: string | null`（随 GLB `meta.presetId` 往返；旧文件/旧存档兼容，导入缺省回退）。

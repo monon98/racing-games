@@ -34,8 +34,11 @@ export function loadSettings(): PlayerSettings {
     carColor: read(KEY_COLOR) || DEFAULT_CAR_COLOR,
     trackMode,
     trackPresetId:
-      trackMode === 'preset' && storedPreset && PRESET_TRACKS.some((p) => p.id === storedPreset)
-        ? storedPreset
+      trackMode === 'preset' &&
+      storedPreset &&
+      (PRESET_TRACKS.some((p) => p.id === storedPreset) || storedPreset.startsWith('local-'))
+        ? // local-* 由运行时清单校验（public/presets），此处放行
+          storedPreset
         : PRESET_TRACKS[0].id,
   };
 }
