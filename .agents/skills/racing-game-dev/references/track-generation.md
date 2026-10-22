@@ -2,7 +2,13 @@
 
 入口：`src/track/generator.ts`，类型见 `src/types.ts`。
 
-## 中心线（赛道生成规则，2026-08-12 从零重做版，用户选定 1C2A3A4B）
+## 赛道来源两类（2026-10-22 预设制改造）
+- **preset（默认）**：官方预设，控制点数据固定在 `src/track/presets.ts`；`generatePresetTrack(meta)` 用 `getPresetTrack(meta.presetId)`（无效 ID 回退第一个预设）→ `samplePresetCenterline`（Catmull-Rom 0.6，间距 1.2m 采样）→ `scaleLoop` 缩放到 `preset.length`；自交则抛错（预设数据错误必须显式失败，不换形状）。相同 presetId 输出逐点一致（确定性测试保证）。
+- preset 模式走**平地管线**：无地形、无限 Plane 地面，与 simple 相同（`buildTrack` 内 `meta.mode !== 'complex'` 判断）。
+- 环境 `meta.seed` 在 preset 模式使用 `preset.seed`（预设外观稳定）；自定义仍为随机种子。
+- 新增预设：`PRESET_TRACKS` 追加条目（id/name/description/length/seed/controls），首页预设下拉数据驱动自动出现；**id 发布后不可更改**（leaderboard/存档/GLB 都引用 presetId）。
+
+## 中心线（自定义随机生成，2026-08-12 从零重做版，用户选定 1C2A3A4B）
 - `generateCenterlinePoints(meta)`：
   - 简单模式：星形随机控制点 + Catmull-Rom 闭环（光滑、不突左突右、不自交，`loopSelfIntersects` 自交重试）；**不要求直线**；长度 1600~2600m 随机，按目标长度采样（间距约 1.2m）后 `scaleLoop` 缩放。
   - 复杂模式（2026-08-14 地形优先重做）：**先生成覆盖赛道的 2D 高度图地形**（`generateTerrain`：值噪声 + 平滑插值 + 相邻格高差钳制 ≈10%，高度 0~14m，强制**双山丘**，并做**道路走廊找平**——中心线两侧约 24m 内压成最近中心线高度，保证轮距左右等高、轮胎接地），**再画 2D 闭环轨道**（复用星形控制点 + Catmull-Rom，不自交）；轨道逐点双线性采样地形高度，最后按采样点坡度 ≤12~13% 钳制；**不考虑交叉轨道**。

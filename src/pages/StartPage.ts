@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { TRACK_VERSION } from '../config';
 import { getLeaderboard, loadActiveTrack, replaceActiveTrack } from '../storage/db';
-import { loadSettings, saveCarColor, savePlayerName, saveTrackMode } from '../storage/settings';
+import { loadSettings, saveCarColor, savePlayerName, saveTrackMode, saveTrackPreset } from '../storage/settings';
 import { buildTrack, generateCenterlinePoints } from '../track/generator';
+import { PRESET_TRACKS, getPresetTrack } from '../track/presets';
 import { downloadBlob, exportTrackToBlob, importTrackFromFile } from '../track/gltf';
 import type { BuiltTrack } from '../track/generator';
 import { TrackPreview } from '../ui/TrackPreview';
@@ -12,6 +13,7 @@ import { fmtTime } from '../utils/format';
 import { randomPlayerName, randomSeed } from '../utils/random';
 
 const MODE_LABEL: Record<TrackMode, string> = {
+  preset: '预设',
   simple: '简单',
   complex: '复杂',
 };
@@ -45,9 +47,14 @@ export function mountStartPage(root: HTMLElement): () => void {
           <label class="field">
             <span>赛道模式（点击重新生成时生效）</span>
             <select id="track-mode">
-              <option value="simple">简单</option>
-              <option value="complex">复杂</option>
+              <option value="preset">预设赛道（固定布局）</option>
+              <option value="simple">自定义 · 简单</option>
+              <option value="complex">自定义 · 复杂</option>
             </select>
+          </label>
+          <label class="field" id="preset-field">
+            <span>预设赛道（点击重新生成时生效）</span>
+            <select id="track-preset"></select>
           </label>
           <div class="track-actions">
             <button id="btn-regenerate" class="btn">重新生成赛道</button>
@@ -74,6 +81,8 @@ export function mountStartPage(root: HTMLElement): () => void {
   const nameInput = root.querySelector<HTMLInputElement>('#player-name')!;
   const colorInput = root.querySelector<HTMLInputElement>('#car-color')!;
   const modeSelect = root.querySelector<HTMLSelectElement>('#track-mode')!;
+  const presetSelect = root.querySelector<HTMLSelectElement>('#track-preset')!;
+  const presetField = root.querySelector<HTMLLabelElement>('#preset-field')!;
   const trackInfo = root.querySelector<HTMLElement>('#track-info')!;
   const leaderboardEl = root.querySelector<HTMLElement>('#leaderboard')!;
   const toastEl = root.querySelector<HTMLElement>('#toast')!;
@@ -92,11 +101,14 @@ export function mountStartPage(root: HTMLElement): () => void {
     toastTimer = window.setTimeout(() => toastEl.classList.add('hidden'), 2600);
   }
 
-  async function createNewTrack(mode: TrackMode): Promise<TrackPackage> {
+  /** 根据设置当前选择的模式/预设生成新赛道包；preset 用固定 seed 使环境稳定 */
+  async function createNewTrack(mode: TrackMode, presetId?: string): Promise<TrackPackage> {
+    const preset = mode === 'preset' ? getPresetTrack(presetId) : null;
     const meta = {
       id: crypto.randomUUID(),
       mode,
-      seed: randomSeed(),
+      presetId: preset ? preset.id : null,
+      seed: preset ? preset.seed : randomSeed(),
       createdAt: Date.now(),
       version: TRACK_VERSION,
     };
@@ -113,7 +125,8 @@ export function mountStartPage(root: HTMLElement): () => void {
   async function refreshTrack(): Promise<void> {
     current = (await loadActiveTrack()) ?? null;
     if (!current) {
-      current = await createNewTrack(loadSettings().trackMode);
+      const settings = loadSettings();
+      current = await createNewTrack(settings.trackMode, settings.trackPresetId);
       await replaceActiveTrack(current);
     }
     currentBuilt = buildTrack(current.meta, current.centerline.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
@@ -139,8 +152,9 @@ export function mountStartPage(root: HTMLElement): () => void {
     if (!current) return;
     const m = current.meta;
     const date = new Date(m.createdAt).toLocaleString();
+    const modeValue = m.mode === 'preset' ? `预设 · ${getPresetTrack(m.presetId).name}` : MODE_LABEL[m.mode];
     trackInfo.innerHTML = `
-      <div class="info-line"><span>模式</span><b>${MODE_LABEL[m.mode]}</b></div>
+      <div class="info-line"><span>模式</span><b>${modeValue}</b></div>
       <div class="info-line"><span>种子</span><b>${m.seed}</b></div>
       <div class="info-line"><span>创建时间</span><b>${date}</b></div>
       <div class="info-line"><span>数据版本</span><b>v${m.version}</b></div>
@@ -180,15 +194,17 @@ export function mountStartPage(root: HTMLElement): () => void {
     return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c));
   }
 
-  async function regenerate(mode: TrackMode): Promise<void> {
+  async function regenerate(mode: TrackMode, presetId?: string): Promise<void> {
+    const preset = mode === 'preset' ? getPresetTrack(presetId) : null;
+    const trackDesc = preset ? `预设赛道「${preset.name}」` : `“${MODE_LABEL[mode]}”模式的自定义赛道`;
     const ok = await showConfirmDialog({
       title: '重新生成赛道',
-      message: `将生成“${MODE_LABEL[mode]}”模式的新赛道，并清除当前赛道的排行榜。是否继续？`,
+      message: `将生成${trackDesc}，并清除当前赛道的排行榜。是否继续？`,
       confirmText: '重新生成',
       danger: true,
     });
     if (!ok) return;
-    const pkg = await createNewTrack(mode);
+    const pkg = await createNewTrack(mode, presetId);
     await replaceActiveTrack(pkg);
     current = pkg;
     currentBuilt = buildTrack(pkg.meta, pkg.centerline.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
@@ -202,14 +218,27 @@ export function mountStartPage(root: HTMLElement): () => void {
     const settings = loadSettings();
     nameInput.value = settings.playerName;
     colorInput.value = settings.carColor;
+    // 预设下拉由数据驱动生成（后续新增预设自动出现）
+    for (const p of PRESET_TRACKS) {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.name}（${p.description}）`;
+      presetSelect.appendChild(opt);
+    }
     modeSelect.value = settings.trackMode;
+    presetSelect.value = settings.trackPresetId;
+    presetField.hidden = modeSelect.value !== 'preset';
 
     nameInput.addEventListener('change', () => savePlayerName(nameInput.value.trim()));
     colorInput.addEventListener('input', () => {
       saveCarColor(colorInput.value);
       preview?.setColor(colorInput.value);
     });
-    modeSelect.addEventListener('change', () => saveTrackMode(modeSelect.value as TrackMode));
+    modeSelect.addEventListener('change', () => {
+      saveTrackMode(modeSelect.value as TrackMode);
+      presetField.hidden = modeSelect.value !== 'preset';
+    });
+    presetSelect.addEventListener('change', () => saveTrackPreset(presetSelect.value));
 
     document.querySelector('#btn-start')!.addEventListener('click', () => {
       const name = nameInput.value.trim();
@@ -227,7 +256,8 @@ export function mountStartPage(root: HTMLElement): () => void {
     });
 
     document.querySelector('#btn-regenerate')!.addEventListener('click', () => {
-      void regenerate(modeSelect.value as TrackMode);
+      const mode = modeSelect.value as TrackMode;
+      void regenerate(mode, mode === 'preset' ? presetSelect.value : undefined);
     });
 
     document.querySelector('#btn-export')!.addEventListener('click', () => {

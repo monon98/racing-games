@@ -11,7 +11,7 @@ export const TRACK_ASSET_TYPE = 'racing-game-track';
 interface TrackUserData {
   type?: string;
   version?: number;
-  meta?: { mode?: TrackMode; seed?: number };
+  meta?: { mode?: TrackMode; seed?: number; presetId?: string | null };
   roadWidth?: number;
   barrierHeight?: number;
   centerline?: Point3[];
@@ -35,7 +35,7 @@ export async function exportTrackToBlob(track: BuiltTrack): Promise<Blob> {
   track.group.userData = {
     type: TRACK_ASSET_TYPE,
     version: track.meta.version,
-    meta: { mode: track.meta.mode, seed: track.meta.seed },
+    meta: { mode: track.meta.mode, seed: track.meta.seed, presetId: track.meta.presetId },
     roadWidth: track.roadWidth,
     barrierHeight: track.barrierHeight,
     centerline: track.points.map((p) => ({ x: p.x, y: p.y, z: p.z })),
@@ -75,7 +75,8 @@ export async function importTrackFromFile(file: File): Promise<TrackPackage> {
     }
     const meta: TrackMeta = {
       id: crypto.randomUUID(),
-      mode: ud.meta?.mode === 'complex' ? 'complex' : 'simple',
+      mode: ud.meta?.mode === 'complex' ? 'complex' : ud.meta?.mode === 'preset' ? 'preset' : 'simple',
+      presetId: typeof ud.meta?.presetId === 'string' ? ud.meta.presetId : null,
       seed: typeof ud.meta?.seed === 'number' ? ud.meta.seed : randomSeed(),
       createdAt: Date.now(),
       version: TRACK_VERSION,

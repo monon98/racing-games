@@ -10,6 +10,7 @@ import {
 } from '../config';
 import type { TrackMeta } from '../types';
 import { mulberry32 } from '../utils/random';
+import { getPresetTrack, samplePresetCenterline } from './presets';
 import { buildEnvironment } from './environment';
 
 export interface BuiltTrack {
@@ -317,8 +318,22 @@ function generateComplexTrack(meta: TrackMeta): THREE.Vector3[] {
   return pts;
 }
 
-/** 根据种子生成闭环中心线采样点（简单=随机点光滑曲线；复杂=地形优先：先高度图后轨道） */
+/** 预设赛道：固定控制点闭环，缩放到预设定义的目标长度（确定性输出，不自交） */
+function generatePresetTrack(meta: TrackMeta): THREE.Vector3[] {
+  const preset = getPresetTrack(meta.presetId);
+  const sampled = samplePresetCenterline(preset);
+  const scaled = scaleLoop(sampled, preset.length);
+  for (let i = 0; i < scaled.length; i++) scaled[i].y = 0;
+  if (loopSelfIntersects(scaled)) {
+    // 预设是手工设计的数据，自交属于数据错误，直接报错而不是静默改变形状
+    throw new Error(`预设赛道「${preset.name}」布局自交，请检查 presets.ts 控制点`);
+  }
+  return scaled;
+}
+
+/** 赛道中心线采样点（preset=固定控制点闭环；simple=随机光滑曲线；complex=地形优先） */
 export function generateCenterlinePoints(meta: TrackMeta): THREE.Vector3[] {
+  if (meta.mode === 'preset') return generatePresetTrack(meta);
   return meta.mode === 'simple' ? generateSimpleTrack(meta) : generateComplexTrack(meta);
 }
 
@@ -394,7 +409,8 @@ function buildGroundVisual(
   mode: TrackMeta['mode'],
   terrain: TerrainData | null,
 ): { mesh: THREE.Mesh; positions: number[]; indices: number[] } {
-  if (mode === 'simple') {
+  // 特殊地面：复杂有地形，simple/preset 都是平地（Plane+平面）
+  if (mode !== 'complex') {
     const geo = new THREE.PlaneGeometry(1800, 1800);
     geo.rotateX(-Math.PI / 2);
     const mesh = new THREE.Mesh(
@@ -594,7 +610,7 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
   const roadWidth = CAR.width * ROAD_WIDTH_MULTIPLIER;
   const halfWidths = computeHalfWidths(points, tangents, roadWidth / 2);
   const barrierHeight = CAR.height * BARRIER_HEIGHT_FACTOR;
-  // 地形优先：复杂赛道先生成覆盖区域的高度图地形，轨道/护栏/环境都贴在地形上
+  // 地形优先：复杂赛道先生成覆盖区域的高度图地形，轨道/护栏/环境都贴在地形上；preset/simple 平地
   const terrain = meta.mode === 'complex' ? generateTerrain(points, meta.seed) : null;
 
   const group = new THREE.Group();
@@ -641,7 +657,7 @@ export function buildTrack(meta: TrackMeta, centerline: THREE.Vector3[]): BuiltT
 
   // 物理地面：简单模式用无限平面；复杂模式用整片地形 Trimesh + y=-30 安全兜底平面
   let ground: CANNON.Body;
-  if (meta.mode === 'simple') {
+  if (meta.mode !== 'complex') {
     // cannon-es Plane 默认法线为 (0,0,1)；绕 X 轴旋转 -90° 使其朝上。
     // 必须把四元数放进构造参数并调用 updateAABB()：旋转后不刷新 AABB，
     // broadphase 会按旧的“竖直面”包围盒剔除车头方向（z>0）的轮子射线，导致前轮永不触地。

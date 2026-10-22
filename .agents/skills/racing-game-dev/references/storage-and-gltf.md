@@ -7,11 +7,11 @@
 - `addLeaderboardEntry`：按 `lapTimeMs` 升序、截取前 10。
 
 ## localStorage（`src/storage/settings.ts`）
-- 玩家名 `racing.playerName`（默认“玩家 + 5 位随机字母数字”）、颜色 `racing.carColor`、模式 `racing.trackMode`（默认 simple）。
+- 玩家名 `racing.playerName`（默认“玩家 + 5 位随机字母数字”）、颜色 `racing.carColor`、模式 `racing.trackMode`（`preset`/`simple`/`complex`，**默认 preset**）、预设选择 `racing.trackPreset`（默认第一个预设）。
 
 ## GLTF/GLB 往返（`src/track/gltf.ts`）
 - 导出：`GLTFExporter.parseAsync(group, { binary: true })`；赛道数据写入 `group.userData`（type=`racing-game-track`、meta、roadWidth、barrierHeight、centerline），GLTFExporter 会序列化到 extras，GLTFLoader 会还原到 `scene.userData`。
-- 导入：仅接受 `.glb` / `.gltf`（内嵌资源）；校验 `userData.type` 与 `centerline.length >= 20`，否则报“非本游戏导出的赛道文件”。
+- 导入：仅接受 `.glb` / `.gltf`（内嵌资源）；校验 `userData.type` 与 `centerline.length >= 20`，否则报“非本游戏导出的赛道文件”。meta 还原 `mode`（兼容旧文件回退 simple）与 `presetId`；preset 赛道由中心线+预设模式重建。
 - 导入后以中心线重建视觉与物理（不依赖原 mesh），GLB 原样存入 DB 供再次导出。
 
 ## 注意

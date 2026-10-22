@@ -1,9 +1,12 @@
-export type TrackMode = 'simple' | 'complex';
+/** 赛道来源：preset = 官方预设（固定布局）；simple/complex = 自定义随机生成 */
+export type TrackMode = 'preset' | 'simple' | 'complex';
 
 export interface TrackMeta {
   id: string;
   mode: TrackMode;
   seed: number;
+  /** preset 模式下的预设 ID（自定义生成时为 null） */
+  presetId: string | null;
   createdAt: number;
   version: number;
 }
@@ -35,4 +38,6 @@ export interface PlayerSettings {
   playerName: string;
   carColor: string;
   trackMode: TrackMode;
+  /** 预设模式下选中的预设赛道 ID */
+  trackPresetId: string;
 }

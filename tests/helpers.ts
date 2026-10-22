@@ -33,12 +33,12 @@ export function check(name: string, cond: boolean, detail = ''): void {
   expect(cond, `${name} ${detail}`).toBe(true);
 }
 
-export function makeMeta(mode: 'simple' | 'complex', seed: number): TrackMeta {
-  return { id: `test-${mode}-${seed}`, mode, seed, createdAt: Date.now(), version: TRACK_VERSION };
+export function makeMeta(mode: 'simple' | 'complex' | 'preset', seed: number, presetId: string | null = null): TrackMeta {
+  return { id: `test-${mode}-${seed}`, mode, seed, presetId, createdAt: Date.now(), version: TRACK_VERSION };
 }
 
-export function buildTrackForMode(mode: 'simple' | 'complex', seed = 42): BuiltTrack {
-  const meta = makeMeta(mode, seed);
+export function buildTrackForMode(mode: 'simple' | 'complex' | 'preset', seed = 42, presetId: string | null = null): BuiltTrack {
+  const meta = makeMeta(mode, seed, presetId);
   return buildTrack(meta, generateCenterlinePoints(meta));
 }
 

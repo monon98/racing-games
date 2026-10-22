@@ -104,9 +104,27 @@ describe('track generation', () => {
     check('road mesh has positions', !!roadAttr && roadAttr.count === points.length * 2, `count=${roadAttr?.count}`);
   });
 
+  it('preset track: fixed layout, deterministic, buildable from stored centerline', () => {
+    const built = buildTrackForMode('preset', 0, 'aurora-ring');
+    // 重建两次，输出必须完全一致（预设=固定布局）
+    const built2 = buildTrackForMode('preset', 999, 'aurora-ring');
+    check(
+      'preset deterministic',
+      built.points.length === built2.points.length &&
+        built.points.every((p, i) => p.distanceTo(built2.points[i]) < 1e-9),
+      String(built.points.length),
+    );
+    check('preset length close to spec', Math.abs(built.totalLength - 1800) < 30, built.totalLength.toFixed(0));
+    check('preset no self-intersection', !loopSelfIntersects(built.points));
+    check('preset flat (no terrain)', built.terrain === null);
+    check('preset all points on ground plane', built.points.every((p) => Math.abs(p.y) < 1e-9));
+    check('preset roadWidth = 12.0', Math.abs(built.roadWidth - 12.0) < 1e-6, String(built.roadWidth));
+    check('preset has barriers', built.physics.barriers.length > 20, String(built.physics.barriers.length));
+  });
+
   it('spawn points are clear of barriers', () => {
-    for (const mode of ['simple', 'complex'] as const) {
-      const built = buildTrackForMode(mode);
+    for (const mode of ['simple', 'complex', 'preset'] as const) {
+      const built = buildTrackForMode(mode, 42, mode === 'preset' ? 'aurora-ring' : null);
       let spawnSafe = true;
       for (let i = 0; i < built.points.length; i += 150) {
         const safe = findSafeSpawnIndex(built, i);
@@ -157,7 +175,17 @@ describe('track generation', () => {
       const meta = makeMeta(mode, 42);
       const points = generateCenterlinePoints(meta);
       const built = buildTrack(meta, points);
-      check(`${mode} centerline used as-is`, built.points === points);
+      check(`${mode} centerline used as-is`, built.points === points, mode);
     }
+    // 预设：同样直接使用 generateCenterlinePoints 的输出，且 meta.presetId 无效时回退第一个预设
+    const meta = makeMeta('preset', 42, 'aurora-ring');
+    const presetPoints = generateCenterlinePoints(meta);
+    const fallback = generateCenterlinePoints({ ...meta, presetId: 'no-such-preset' });
+    check(
+      'preset centerline used as-is & fallback to first preset',
+      generateCenterlinePoints(meta).length === presetPoints.length &&
+        fallback.every((p, i) => p.distanceTo(presetPoints[i]) < 1e-9),
+      String(presetPoints.length),
+    );
   });
 });

@@ -39,6 +39,7 @@ export function mountPreviewPage(root: HTMLElement): () => void {
       const meta: TrackMeta = {
         id: crypto.randomUUID(),
         mode: settings.trackMode,
+        presetId: settings.trackMode === 'preset' ? settings.trackPresetId : null,
         seed: randomSeed(),
         createdAt: Date.now(),
         version: TRACK_VERSION,

@@ -21,7 +21,8 @@ description: 'Implementation guidelines for the three.js racing game in the repo
 ## Workflows
 
 ### 赛道生成或物理调整
-读 `references/track-generation.md` 与 `references/physics-and-rules.md`，然后修改 `src/track/generator.ts`、`src/physics/vehicle.ts`、`src/game/Game.ts`。
+读 `references/track-generation.md` 与 `references/physics-and-rules.md`，然后修改 `src/track/generator.ts`、`src/track/presets.ts`、`src/physics/vehicle.ts`、`src/game/Game.ts`。
+- 赛道为“预设 + 自定义”两类来源：默认预设轨道（`src/track/presets.ts`，固定控制点、确定性输出、不随生成器版本漂移）；简单/复杂随机生成为“自定义”模式。新增预设只需在 `PRESET_TRACKS` 追加（id 发布后不可改，`presetId` 随 GLB 往返）。
 
 ### 存储、排行榜或 GLTF 导入导出
 读 `references/storage-and-gltf.md`，然后修改 `src/storage/` 与 `src/track/gltf.ts`。

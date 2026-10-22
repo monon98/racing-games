@@ -203,3 +203,12 @@
 - 尺寸联动：赛道基础宽保持 12m → `ROAD_WIDTH_MULTIPLIER = 12/1.7`；护栏高 = 1.1 × 车高 = **1.32m**；`CHASSIS_SPAWN_HEIGHT` 1.1 → **1.05**（0.24 + 0.38 + 0.4 + 落差）；`TrackPreview` 静态轮位公式不变自适应。
 - 爬坡测试适配：车身缩短后更早冲出最陡段、过脊弹跳进入 1s 快照（前轮悬架伸长无接触属正常飞起）；断言从"固定 i=59 快照 ≥3 轮"改为"爬坡启动段前 50 帧 ≥3 轮着地占比 ≥70%"，翻车/后溜/加速断言不变（`tests/physics.spec.ts`）。诊断方式：临时 spec 打印四轮 `isInContact/suspensionLength` + 俯仰/垂直速度，确认 1s 处前轮无接触为过脊弹跳而非爬坡失败。
 - 测试同步：`track.spec.ts` 断言 wheelRadius=0.4、barrierHeight=1.32（roadWidth 12m 不变）。
+
+## 2026-10-22 轨道预设制：预设轨道成为默认，随机生成归档为自定义
+- 用户决策：之前的随机赛道生成归档为“自定义”模式；主玩法改为**预设轨道固定布局**，先支持一种预设，架构上直接支持多预设扩展。
+- 数据结构：`TrackMode` 扩为 `'preset' | 'simple' | 'complex'`；`TrackMeta` 新增 `presetId: string | null`（随 GLB `meta.presetId` 往返；旧文件/旧存档兼容，导入缺省回退）。
+- 新模块 `src/track/presets.ts`：`PresetTrack` 接口 + `PRESET_TRACKS` 数组（首发「极光环道」aurora-ring，16 个控制点、目标 1800m、固定 seed 20260）+ `getPresetTrack`（无效 ID 回退第一个）+ `samplePresetCenterline`（Catmull-Rom 0.6 与简单模式同参）。
+- 生成器：`generatePresetTrack` = 采样 → `scaleLoop` 到预设长度 → 自交即抛错（预设数据错误显式失败，不静默换形）；`buildTrack` 中 preset 走 simple 的平地管线（`meta.mode !== 'complex'`）。
+- 启动页：模式下拉改“预设赛道（固定布局）/ 自定义 · 简单 / 自定义 · 复杂”，preset 模式显示预设下拉（数据驱动，后续加预设自动出现）；预设模式 seed 使用 `preset.seed`（环境稳定）；localStorage 新增 `racing.trackPreset`（默认极光环道）。
+- 测试：新增预设用例（两次构建逐点一致/长度 1800±30/不自交/平地/路宽 12m/护栏存在；centerline 输入恒等 + 无效 presetId 回退）；spawn 安全点测试覆盖 preset；共 35 用例 / 74 断言。
+- 文档与 skill 同步：README / AGENTS.md / requirements / roadmap / progress / `track-generation.md`（预设节）/ `storage-and-gltf.md`（settings 与 meta 往返）。
