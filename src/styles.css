@@ -576,7 +576,8 @@ select {
   display: none !important;
 }
 
-/* hidden 属性会被 .field 的 display:flex 覆盖，显式处理 */
-.field[hidden] {
+/* hidden 属性会被 .field/.btn 等自带 display 的元素覆盖，统一用 !important 根治 */
+.field[hidden],
+.btn[hidden] {
   display: none !important;
 }
