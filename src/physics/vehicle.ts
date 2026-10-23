@@ -37,9 +37,12 @@ const ENGINE_BRAKE = 50;
 const COAST_BRAKE = 4;
 /** 四轮全离地时的上升速度上限（m/s）：只防止极端弹射，下落完全交给重力 */
 const MAX_AIR_UPWARD_SPEED = 2.0;
-/** 松左右键后轮子回中速度（慢）；按住转向时响应速度（快） */
+/** 松左右键后轮子回中速度（慢）；按住转向时响应速度（快）；均随速度再加成（STEER_SPEED_BONUS） */
 const STEER_RETURN_RATE = 5.5;
 const STEER_APPLY_RATE = 7;
+/** 高速时打角/回正的额外速率：45m/s 时打角≈15/s、回正≈13.5/s，0.1s 内完成变向，
+ *  避免转向角拖着前轮冲量用 yaw 惯量甩尾（2026-10-23 实测满锁松手 0.25s 滞留导致大侧偏） */
+const STEER_SPEED_BONUS = 8;
 /** 底盘原点在静止时的离地高度（|连接点y| 0.24 + 悬架静止长 0.38 + 轮半径 0.4 = 1.02，+0.03 落差），重生/出生用 */
 export const CHASSIS_SPAWN_HEIGHT = 1.05;
 /** 碰撞回弹：撞护栏后沿接触法线立即反弹的比例（restitution） */
@@ -52,16 +55,30 @@ const COLLISION_MIN_IMPACT = 1.2;
 const DRIFT_SLIP_ENTER = 0.35;
 const DRIFT_SLIP_EXIT = 0.15;
 const DRIFT_MIN_SPEED = 8;
-/** 抓地：前轴（转向轮）10——转向响应充足；后轴（驱动轮）3.2——油门占摩擦椭圆后侧向余量小，
- *  重刹/大转角瞬态时后轮先滑动 → 动力甩尾倾向；漂移检测用侧偏角瞬态即可命中 */
-const GRIP_FRONT = 10;
+/** 抓地：前轴（转向轮）5——横向加速度 ≈1.4g，低于整车倾翻阈值（≈1.8g），同时保证 S 变向响应；
+ *  2026-10-23 两端实测：前轴 10（≈2.8g）满舵兜圈+S 变向直接侧翻；角阻尼 1.0（每步清零角速度，
+ *  旋转动力学失真）会掩盖滚转问题、表现得“永不翻车”但转向响应迟钝 */
+const GRIP_FRONT = 5;
 const GRIP_REAR = 3.2;
-/** 前轴滑移时抓地滚动衰减（0.2→0.5 rad 间从 10 降到 5.5），甩尾后不至于彻底失控 */
-const GRIP_FRONT_SLIDING = 5.5;
+/** 前轴滑移时抓地滚动衰减（0.2→0.5 rad 间从 5 降到 3.3），甩尾后不至于彻底失控 */
+const GRIP_FRONT_SLIDING = 3.3;
 const GRIP_ROLL_START = 0.2;
 const GRIP_ROLL_END = 0.5;
-/** 侧偏角小于该值（rad）时才施加“松键回正”侧滑抑制，避免打断真实漂移 */
-const CENTERING_SLIP_LIMIT = 0.25;
+/** 侧滑抑制：侧偏角超过该值（rad）后抑制强度线性衰减到 0（ LooseKey 回正仍有效但不瞬间吸附漂移尾巴） */
+const CENTERING_SLIP_FADE = 0.9;
+/** 侧滑抑制强度保底（比例）：深侧滑也不至于完全不抑制，松手后 1s 内能收回来 */
+const CENTERING_SLIP_FLOOR = 0.3;
+/** 滚转稳定（街机防翻辅助）：接地时 up.y 低于该阈值才施加反侧倾力矩；与 P/D 增益按 2026-10-23 实测调参
+ *（旧值角阻尼 1.0 等于每步清零角速度，旋转动力学失真掩盖了翻车问题） */
+const ROLL_STAB_UP_LIMIT = 0.97;
+const ROLL_STAB_TORQUE_MAX = 30000;
+const ROLL_STAB_P = 160000;
+const ROLL_STAB_D = 12000;
+/** 防抬头 PD 反扭矩上限：≥2 轮接地时 20000；空中/坡顶冲出（<2 轮接触）时允许更大力矩——
+ *  2026-10-23 复杂赛道实测：坡顶瞬间仅 1 轮接触 + 悬架弹射力矩（≈3 万 N·m）会把车打成后空翻，
+ *  地面版上限压不住，需要空中加强版在 0.3s 内刹住俯仰旋转 */
+const PITCH_COUNTER_MAX = 20000;
+const PITCH_COUNTER_AIR_MAX = 48000;
 
 /** cannon-es 四轮车辆（RaycastVehicle 悬架） */
 export class CarPhysics {
@@ -92,9 +109,10 @@ export class CarPhysics {
     this.chassis = new CANNON.Body({
       mass: 750,
       // 线性阻尼模拟空气阻力/滚动阻力，避免松油门后滑行过长
-      // 线性阻尼 0.12：极速可达 200+km/h，松油仍能缓慢减速
       linearDamping: 0.05,
-      angularDamping: 1.0,
+      // 角阻尼：1.0 会让 cannon 按 pow(1-1,dt)=0 每步直接清零角速度，旋转动力学完全失真
+      // （2026-10-23 实测导致 S 变向迟钝、翻车被掩盖）；0.75 保留真实感又压制复杂地形瞬态
+      angularDamping: 0.75,
     });
     // 重心下移 0.10m（碰撞盒下偏），车身也更贴近路面，降低抬头力矩
     this.chassis.addShape(chassisShape, new CANNON.Vec3(0, -0.1, 0));
@@ -119,7 +137,7 @@ export class CarPhysics {
       dampingRelaxation: 6.0,
       dampingCompression: 14,
       maxSuspensionForce: 200000,
-      rollInfluence: 0.08,
+      rollInfluence: 0.05,
       axleLocal: new CANNON.Vec3(-1, 0, 0),
       useCustomSlidingRotationalSpeed: true,
       customSlidingRotationalSpeed: 30,
@@ -192,8 +210,12 @@ export class CarPhysics {
   update(input: VehicleInput, dt: number): void {
     // 转向角随速度衰减（速度敏感转向）：低速灵活，高速收敛
     const targetSteer = input.steering * this.maxSteerAt(Math.max(0, this.forwardSpeed()));
-    // 按住转向时快速打到目标角；松键后较快回中
-    const steerRate = targetSteer !== 0 ? STEER_APPLY_RATE : STEER_RETURN_RATE;
+    // 打角/回正速率都随速度自适应：低速允许从容，高速必须快——
+    // 否则松键后转向角在前轮冲量上多停留 0.2s+，利用 yaw 惯量把车甩进大侧偏（“S 转不过来、松手甩尾”的另一根源）
+    const steerSpeedT = Math.min(1, Math.max(0, this.forwardSpeed()) / STEER_FALLOFF_SPEED);
+    const steerRate = targetSteer !== 0
+      ? STEER_APPLY_RATE + STEER_SPEED_BONUS * steerSpeedT
+      : STEER_RETURN_RATE + STEER_SPEED_BONUS * steerSpeedT;
     this.steerCurrent += (targetSteer - this.steerCurrent) * Math.min(1, steerRate * dt);
 
     const slipAngle = this.computeSlipAngle();
@@ -206,18 +228,19 @@ export class CarPhysics {
       this.drift = false;
     }
 
-    // 侧滑抑制：仅在无转向输入且车身接近直线（小侧偏角）时，衰减横向速度分量。
-    // 大侧偏（漂移中）不抑制——让动力滑移自然延续，松键也不立即“吸附”回直。
-    if (Math.abs(input.steering) < 0.05 && slipAngle < CENTERING_SLIP_LIMIT) {
+    // 侧滑抑制：无转向输入时衰减横向速度分量（松键回正）。
+    // 强度随侧偏角渐变：小侧偏全量（快速回直），大侧偏时减弱 → 松手也能收回来但漂移/甩尾尾巴不会被瞬间“吸附”。
+    if (Math.abs(input.steering) < 0.05) {
       const speed = this.chassis.velocity.length();
       if (speed > 2) {
+        const strength = 4 * Math.max(CENTERING_SLIP_FLOOR, 1 - slipAngle / CENTERING_SLIP_FADE);
         const fwd = new CANNON.Vec3(0, 0, 1);
         this.chassis.quaternion.vmult(fwd, fwd);
         const fwdComp = this.chassis.velocity.dot(fwd);
         const lateral = this.chassis.velocity.clone().vsub(fwd.clone().scale(fwdComp));
         lateral.y = 0; // 只抑制水平侧滑，不动垂直速度（避免干扰悬架）
         if (lateral.length() > 0.05) {
-          this.chassis.velocity.vsub(lateral.scale(Math.min(1, 4 * dt)), this.chassis.velocity);
+          this.chassis.velocity.vsub(lateral.scale(Math.min(1, strength * dt)), this.chassis.velocity);
         }
       }
     }
@@ -250,9 +273,9 @@ export class CarPhysics {
       }
       // 过弯限速“50km/h 硬截断 + ramp 刹车”已移除：转向能力改为随速度衰减（maxSteerAt），
       // 高速过弯靠动力削减与抓地下降自然受限，不再有“撞限速墙”感。
-      // 防抬头后翻：PD 反扭矩（等效“防抬头杠”），把车头压回，不损失动力。
-      // 阈值必须低于“前轮悬垂落空”的俯仰角（轮距·半轴距 ≈ 0.023 rad）：
-      // 否则满油门时前轮离地、高速转向完全失效（2026-10-23 实测根因）。
+      // 防抬头后翻：PD 反扭矩（等效“防抬头杠”）——抬角度数取“车头相对路面法线的带符号角”
+      // （asin(forward·normal)）：车身贴合坡面时天然 ≈0（斜坡不误伤），越过 90°（倒栽）方向依旧正确——
+      // 2026-10-23 实测：acos(up·normal) 版在越过 90° 后会把已经翻过头的车继续往旋转方向推，转为失控空翻
       const groundNormal = new CANNON.Vec3(0, 1, 0);
       let groundCount = 0;
       for (const w of this.vehicle.wheelInfos) {
@@ -261,17 +284,20 @@ export class CarPhysics {
           groundCount++;
         }
       }
-      if (groundCount > 0) groundNormal.normalize();
-      const up = new CANNON.Vec3(0, 1, 0);
-      this.chassis.quaternion.vmult(up, up);
-      const pitch = Math.acos(Math.max(-1, Math.min(1, up.dot(groundNormal))));
-      // 阈值 0.03：低于“前轮悬垂落空”的俯仰角（≈0.023 rad 的两倍量级，兼顾斜坡不误伤），
-      // 力度介于原版（90000/4000/15000）与“防前轮离地”更强版本（260000/8000/24000）之间
-      if (pitch > 0.03) {
+      groundNormal.normalize();
+      const fwdNow = new CANNON.Vec3(0, 0, 1);
+      this.chassis.quaternion.vmult(fwdNow, fwdNow);
+      const pitchUp = Math.asin(Math.max(-1, Math.min(1, fwdNow.dot(groundNormal))));
+      // 阈值 0.03：低于“前轮悬垂落空”的俯仰角（≈0.023 rad 的两倍量级），满油门不误压前轮
+      if (pitchUp > 0.03) {
         const right = new CANNON.Vec3(1, 0, 0);
         this.chassis.quaternion.vmult(right, right);
         const pitchRate = -this.chassis.angularVelocity.dot(right); // 正=抬头速率
-        const counter = Math.min(20000, 160000 * pitch + 8000 * Math.max(0, pitchRate));
+        // 接地轮 <2 时认为“即将离地/坡顶冲出”，启用空中加强版反扭矩压制后空翻
+        const counter = Math.min(
+          groundCount < 2 ? PITCH_COUNTER_AIR_MAX : PITCH_COUNTER_MAX,
+          160000 * pitchUp + 8000 * Math.max(0, pitchRate),
+        );
         this.chassis.torque.x += right.x * counter;
         this.chassis.torque.y += right.y * counter;
         this.chassis.torque.z += right.z * counter;
@@ -301,6 +327,33 @@ export class CarPhysics {
       : 0;
     const brake = Math.max(input.brake * BRAKE_FORCE, engineBrake);
     for (let i = 0; i < 4; i++) this.vehicle.setBrake(brake, i);
+
+    // 滚转稳定（街机防翻辅助）：接地且车身明显侧倾（up.y 低）时，沿车头方向施加反侧倾力矩。
+    // 防止“油门+满舵”过弯或山坡瞬态侧翻（角阻尼 1.0 曾每步清零角速度，掩盖了翻车；
+    // 降到真实动力学后需要这个辅助保持街机可控感）。空中不介入，落地仍会自然翻转/弹跳。
+    {
+      let rollWheels = 0;
+      for (const w of this.vehicle.wheelInfos) {
+        if (w.isInContact) rollWheels++;
+      }
+      if (rollWheels > 0) {
+        const upNow = new CANNON.Vec3(0, 1, 0);
+        this.chassis.quaternion.vmult(upNow, upNow);
+        if (upNow.y < ROLL_STAB_UP_LIMIT) {
+          const rightNow = new CANNON.Vec3(1, 0, 0);
+          this.chassis.quaternion.vmult(rightNow, rightNow);
+          const fwdNow = new CANNON.Vec3(0, 0, 1);
+          this.chassis.quaternion.vmult(fwdNow, fwdNow);
+          // 侧倾角：右轴竖直分量>0 = 右侧抬起（车体向左滚转）；>1 侧 = 反向
+          const roll = Math.asin(Math.max(-1, Math.min(1, rightNow.y)));
+          const rollRate = this.chassis.angularVelocity.dot(fwdNow);
+          const counter = Math.min(ROLL_STAB_TORQUE_MAX, ROLL_STAB_P * roll + ROLL_STAB_D * rollRate);
+          this.chassis.torque.x -= fwdNow.x * counter;
+          this.chassis.torque.y -= fwdNow.y * counter;
+          this.chassis.torque.z -= fwdNow.z * counter;
+        }
+      }
+    }
 
     this.world.step(this.fixedTimeStep, dt, this.maxSubSteps);
 

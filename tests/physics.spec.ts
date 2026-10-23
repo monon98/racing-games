@@ -20,6 +20,53 @@ describe('vehicle physics', () => {
     rig.physics.dispose();
   });
 
+  it.each(MODES)('%s: throttle + full steering does not roll over (user flip regression)', (mode) => {
+    const built = buildTrackForMode(mode);
+    const rig = createCarRig(built, true);
+    for (let i = 0; i < 30; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    // 场景：从静止全油门 + 满舵持续转圈 4s——2026-10-23 前轴抓地 10（≈2.8g，超倾翻阈 1.8g）时必翻
+    let minUp = 1;
+    for (let i = 0; i < 240; i++) {
+      rig.physics.update({ throttle: 1, brake: 0, steering: 1 }, 1 / 60);
+      minUp = Math.min(minUp, rig.physics.getState().up.y);
+    }
+    check('no rollover: throttle + full steering from standstill', minUp > 0.85, `min up.y=${minUp.toFixed(3)}`);
+    rig.physics.dispose();
+  });
+
+  it.each(MODES)('%s: S-switch while driving responds and does not roll over', (mode) => {
+    const built = buildTrackForMode(mode);
+    const rig = createCarRig(built, true);
+    for (let i = 0; i < 30; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    // 先直线加速到中高速，再做 S 变向（左 1s → 右 1.5s）：贴近玩家真实操作节奏，
+    // 而不是“持续满舵转圈钉墙”的病态姿态
+    for (let i = 0; i < 120; i++) rig.physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+    const entrySpeed = rig.physics.getState().absoluteSpeed;
+    let minUp = 1;
+    let sawLeftYaw = false;
+    let sawRightYaw = false;
+    for (let i = 0; i < 90; i++) {
+      rig.physics.update({ throttle: 1, brake: 0, steering: 1 }, 1 / 60);
+      const yaw = rig.physics.getState().angularVelocity.y;
+      if (yaw > 0.3) sawLeftYaw = true;
+      minUp = Math.min(minUp, rig.physics.getState().up.y);
+    }
+    let switchResponded = false;
+    for (let i = 0; i < 90; i++) {
+      rig.physics.update({ throttle: 1, brake: 0, steering: -1 }, 1 / 60);
+      const yaw = rig.physics.getState().angularVelocity.y;
+      if (yaw < -0.1) sawRightYaw = true;
+      if (yaw < -0.4) switchResponded = true;
+      minUp = Math.min(minUp, rig.physics.getState().up.y);
+    }
+    check(
+      'S-switch: yaw reverses sign and no rollover',
+      entrySpeed > 20 && sawLeftYaw && sawRightYaw && switchResponded && minUp > 0.85,
+      `entry=${entrySpeed.toFixed(1)} leftYaw=${sawLeftYaw} rightYaw=${sawRightYaw} responded=${switchResponded} minUp=${minUp.toFixed(3)}`,
+    );
+    rig.physics.dispose();
+  });
+
   it.each(MODES)('%s: respawn with throttle does not bounce or flip', (mode) => {
     const built = buildTrackForMode(mode);
     const rig = createCarRig(built);
