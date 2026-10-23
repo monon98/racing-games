@@ -222,6 +222,16 @@
   - skill 与文档同步改回（track-generation / storage-and-gltf / requirements / progress / README）。
 - 预设模式即时生效（2026-10-22 用户决策）：预设布局固定，无需“重新生成”——**预设模式隐藏「重新生成赛道」按钮**（仅自定义模式显示）；预设下拉选中或切到预设模式立即激活（`activatePreset`：已是该预设则直接提示；清榜前确认，取消/加载失败回退下拉与存档到当前赛道预设）。激活逻辑重构为通用 `applyTrack`（新 id → `replaceActiveTrack` → 刷新 UI）。提示语更新为“切换预设 / 重新生成会清除当前赛道的排行榜”。
 - 修复：`.btn { display:inline-block }` 会覆盖 `hidden` 属性的默认 `display:none`，导致预设模式下「重新生成赛道」按钮仍然显示；CSS 增加 `.btn[hidden] { display:none !important }`（与之前 `.field[hidden]` 同类问题，教训：凡是被 CSS 赋 display 的元素，`hidden` 一律要显式处理）。
+- 操纵体验重做（2026-10-23 实施，romise A+B+C）：调研结论与实现——
+  - 速度敏感转向 `maxSteerAt(speed)`（0.65→0.12 rad，STEER_FALLOFF_SPEED=45 m/s 二次 ease-out）：高速不再一点就画龙。
+  - 移除旧 50km/h 过弯截断（`TURN_MAX_SPEED` 及动力 taper/四轮 ramp 刹车全部删除）：高速可保持动量过弯。
+  - 转向回正 3/s → 5.5/s：出弯干脆。
+  - 防抬头 PD 调整（阈值 0.04→0.03、90000→160000、D 4000→8000、上限 15000→20000）：**根因发现——满油门时前轮在 pitch≈0.023 rad 即悬垂落空，旧阈值 0.04 来不及压制，高速满舵完全没有转向力**（前轮 c0/f0 实测）。过强版本（0.015/260000/8000/24000）会与后驱扭矩纠缠，在 complex 复活点产生俯仰震荡（up.y 跌到 0.33），0.03/160000/8000/20000 折中通过全部既有测试。
+  - frictionSlip 3.2 静态 → 帧级动态：前轴（转向）10、后轴（驱动）3.2，前轴按侧偏角 0.2→0.5 rad 滚动衰减到 5.5。**实证**：cannon-es `maximp = suspensionForce×dt×frictionSlip`，3.2 与默认 10.5 相比转向响应严重不足（k≈0.09 时满舵完全无转向）；且后轴降抓地在稳态弯完全不改变平衡（后轮冲量需求只有几何切向量级，不担侧向力，纯推头）。
+  - 侧滑抑制加门槛 `CENTERING_SLIP_LIMIT=0.25` rad：大侧偏（漂移/甩尾/回弹）时不强拉车身回直。
+  - 漂移判定从「横摆率 0.6s 内翻转 ≥2 次」改为侧偏角状态机（进入 0.35 / 退出 0.15 / 最低 8 m/s，迟滞）；并澄清：**cannon-es 冲量轮胎稳态过弯车身贴轨迹、侧偏角≈0，自发甩尾不存在**，真实侧偏仅在瞬态（撞墙回弹、大转角切换、颠簸）出现，drift 标志本身可靠。测试断言随之改为稳态满舵不甩飞 + 松手回正。
+  - 调试方法沉淀：`debugWheelStates()`（接触/悬架力/侧向冲量/滑移标记）、`maxSteerAt()`/`getSlipAngle()` 公开接口；曾用 `node:fs` 把逐帧状态写文件绕过 vitest 静默输出。
+  - 教训：物理调参必须逐帧 dump（位置/接触矩阵/skidInfo/sideImpulse）而不是靠猜；多个“看似不相关”的测试失败可能在同一根因（前轮离地）。
 - 教训：`hidden` 属性会被 `.field { display:flex }` 覆盖（本次 council 修复 `.field[hidden]`）；IndexedDB store 的增删必须通过版本升级完成，谨慎规划版本号一次性到位。
 
 ## 2026-10-22 本地文件预设

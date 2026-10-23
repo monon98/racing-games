@@ -18,7 +18,11 @@ export interface VehicleState {
   absoluteSpeed: number;
 }
 
-const MAX_STEER = 0.8;
+// 转向为速度敏感曲线：低速灵活（37°），高速平滑衰减到 7°（STEER_FALLOFF_SPEED 处到底）
+const MAX_STEER_SLOW = 0.65;
+const MAX_STEER_FAST = 0.12;
+/** 转向角衰减到最小的速度（m/s，≈162km/h；极速 200km/h 前已到底） */
+const STEER_FALLOFF_SPEED = 45;
 // 质量加重（抗飞起）；发动机力同步提高保持 0-100 约 1.5s（7500×2/750≈20 m/s²）；
 // 倒车约等于旧正向加速：7500 × 0.65 ≈ 4875N/轮
 const ENGINE_FORCE = 7500;
@@ -27,7 +31,6 @@ const REVERSE_MAX_SPEED = 8; // m/s ≈ 29 km/h
 /** 倒车+转向时最高倒车速度：10 m/s ≈ 36 km/h */
 const REVERSE_TURN_MAX_SPEED = 10;
 const FORWARD_MAX_SPEED = 200 / 3.6; // 200 km/h
-const TURN_MAX_SPEED = 50 / 3.6; // 转向时最高时速 50 km/h
 const BRAKE_FORCE = 55;
 const ENGINE_BRAKE = 50;
 /** 单纯松油门（无转向）的滑行制动，缓慢减速；带转向时用 ENGINE_BRAKE 快速降速 */
@@ -35,7 +38,7 @@ const COAST_BRAKE = 4;
 /** 四轮全离地时的上升速度上限（m/s）：只防止极端弹射，下落完全交给重力 */
 const MAX_AIR_UPWARD_SPEED = 2.0;
 /** 松左右键后轮子回中速度（慢）；按住转向时响应速度（快） */
-const STEER_RETURN_RATE = 3;
+const STEER_RETURN_RATE = 5.5;
 const STEER_APPLY_RATE = 7;
 /** 底盘原点在静止时的离地高度（|连接点y| 0.24 + 悬架静止长 0.38 + 轮半径 0.4 = 1.02，+0.03 落差），重生/出生用 */
 export const CHASSIS_SPAWN_HEIGHT = 1.05;
@@ -45,6 +48,20 @@ const COLLISION_BOUNCE = 0.35;
 const COLLISION_SPEED_RETAIN = 0.8;
 /** 低于该法向冲击速度（m/s）不主动回弹（贴墙低速接触不抖动） */
 const COLLISION_MIN_IMPACT = 1.2;
+/** 漂移状态（HUD 用）：进入/退出侧偏角阈值（rad）与最低进入速度（m/s） */
+const DRIFT_SLIP_ENTER = 0.35;
+const DRIFT_SLIP_EXIT = 0.15;
+const DRIFT_MIN_SPEED = 8;
+/** 抓地：前轴（转向轮）10——转向响应充足；后轴（驱动轮）3.2——油门占摩擦椭圆后侧向余量小，
+ *  重刹/大转角瞬态时后轮先滑动 → 动力甩尾倾向；漂移检测用侧偏角瞬态即可命中 */
+const GRIP_FRONT = 10;
+const GRIP_REAR = 3.2;
+/** 前轴滑移时抓地滚动衰减（0.2→0.5 rad 间从 10 降到 5.5），甩尾后不至于彻底失控 */
+const GRIP_FRONT_SLIDING = 5.5;
+const GRIP_ROLL_START = 0.2;
+const GRIP_ROLL_END = 0.5;
+/** 侧偏角小于该值（rad）时才施加“松键回正”侧滑抑制，避免打断真实漂移 */
+const CENTERING_SLIP_LIMIT = 0.25;
 
 /** cannon-es 四轮车辆（RaycastVehicle 悬架） */
 export class CarPhysics {
@@ -62,9 +79,6 @@ export class CarPhysics {
   private barrierHit: { body: CANNON.Body; normal: CANNON.Vec3; impact: number } | null = null;
   private steerCurrent = 0;
   private drift = false;
-  private yawSign = 0;
-  private yawFlips = 0;
-  private yawWindow = 0;
 
   constructor() {
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.81, 0) });
@@ -156,14 +170,45 @@ export class CarPhysics {
     this.barrierIds.add(body.id);
   }
 
+  /** 速度敏感最大转向角：低速 MAX_STEER_SLOW，高速平滑衰减到 MAX_STEER_FAST */
+  maxSteerAt(speed: number): number {
+    const t = Math.min(1, Math.max(0, speed) / STEER_FALLOFF_SPEED);
+    // 二次 ease-out：速度前段衰减更快（低速保留灵活性），高速更收敛
+    const eased = 1 - (1 - t) * (1 - t);
+    return MAX_STEER_SLOW + (MAX_STEER_FAST - MAX_STEER_SLOW) * eased;
+  }
+
+  /** 车身侧偏角（rad）：横向速度相对前进速度的 atan2（取绝对值） */
+  private computeSlipAngle(): number {
+    const fwd = new CANNON.Vec3(0, 0, 1);
+    this.chassis.quaternion.vmult(fwd, fwd);
+    const right = new CANNON.Vec3(1, 0, 0);
+    this.chassis.quaternion.vmult(right, right);
+    const v = this.chassis.velocity;
+    const fwdComp = Math.max(Math.abs(v.dot(fwd)), 0.5);
+    return Math.atan2(Math.abs(v.dot(right)), fwdComp);
+  }
+
   update(input: VehicleInput, dt: number): void {
-    const targetSteer = input.steering * MAX_STEER;
-    // 按住转向时快速打到目标角；松键后缓慢回中
+    // 转向角随速度衰减（速度敏感转向）：低速灵活，高速收敛
+    const targetSteer = input.steering * this.maxSteerAt(Math.max(0, this.forwardSpeed()));
+    // 按住转向时快速打到目标角；松键后较快回中
     const steerRate = targetSteer !== 0 ? STEER_APPLY_RATE : STEER_RETURN_RATE;
     this.steerCurrent += (targetSteer - this.steerCurrent) * Math.min(1, steerRate * dt);
 
-    // 侧滑抑制：无转向输入时，衰减垂直于车头的速度分量（松开左右键后迅速回正行驶方向）
-    if (Math.abs(input.steering) < 0.05) {
+    const slipAngle = this.computeSlipAngle();
+    const absSpeed = this.chassis.velocity.length();
+
+    // 漂移状态机（侧偏角驱动，带迟滞）：高速 + 大侧偏进入，侧偏回落或车辆降速退出。
+    if (!this.drift) {
+      if (absSpeed > DRIFT_MIN_SPEED && slipAngle > DRIFT_SLIP_ENTER) this.drift = true;
+    } else if (slipAngle < DRIFT_SLIP_EXIT || absSpeed < 4) {
+      this.drift = false;
+    }
+
+    // 侧滑抑制：仅在无转向输入且车身接近直线（小侧偏角）时，衰减横向速度分量。
+    // 大侧偏（漂移中）不抑制——让动力滑移自然延续，松键也不立即“吸附”回直。
+    if (Math.abs(input.steering) < 0.05 && slipAngle < CENTERING_SLIP_LIMIT) {
       const speed = this.chassis.velocity.length();
       if (speed > 2) {
         const fwd = new CANNON.Vec3(0, 0, 1);
@@ -177,32 +222,13 @@ export class CarPhysics {
       }
     }
 
-    // 抖动 → 漂移：满舵 + 油门时横摆率在 0.6s 内翻转 ≥2 次（第二次抖动），进入可控侧滑/失控，
-    // 降低抓地力避免持续抖动；松开转向后立即恢复。
-    if (Math.abs(input.steering) > 0.5 && input.throttle > 0) {
-      const yawRate = this.chassis.angularVelocity.y;
-      const sig = Math.sign(yawRate);
-      if (sig !== 0 && sig !== this.yawSign) {
-        if (this.yawSign !== 0) {
-          this.yawFlips++;
-          if (this.yawFlips >= 2) this.drift = true;
-        }
-        this.yawSign = sig;
-      }
-      this.yawWindow += dt;
-      if (this.yawWindow > 0.6) {
-        this.yawFlips = 0;
-        this.yawWindow = 0;
-      }
-    } else {
-      this.yawSign = 0;
-      this.yawFlips = 0;
-      this.yawWindow = 0;
-      this.drift = false;
-    }
-    const slip = this.drift ? 2.4 : 3.2;
-    for (const w of this.vehicle.wheelInfos) {
-      w.frictionSlip = slip;
+    // 前轴抓地随侧偏角滚动衰减；后轴保持低抓地（动力甩尾倾向）
+    const gripT = Math.min(1, Math.max(0, (slipAngle - GRIP_ROLL_START) / (GRIP_ROLL_END - GRIP_ROLL_START)));
+    for (let i = 0; i < this.vehicle.wheelInfos.length; i++) {
+      const w = this.vehicle.wheelInfos[i];
+      w.frictionSlip = i < 2
+        ? GRIP_FRONT + (GRIP_FRONT_SLIDING - GRIP_FRONT) * gripT
+        : GRIP_REAR;
     }
 
     this.vehicle.setSteeringValue(this.steerCurrent, 0);
@@ -211,7 +237,7 @@ export class CarPhysics {
     // RaycastVehicle 在 right=X(0)/forward=Z(2)/up=Y(1) 配置下，
     // 正发动机力会沿 -Z 推（实测倒车），因此取反：正油门 = 向前(+Z)。
     let force = -input.throttle * ENGINE_FORCE;
-    // 转向时不允许无限加速：转向越深动力越低（满舵约 55% 动力）
+    // 转向时不允许无限加速：转向越深动力越低（满舵约 55% 动力；出弯线性恢复）
     if (Math.abs(input.steering) > 0.05) {
       force *= 1 - 0.45 * Math.min(1, Math.abs(input.steering));
     }
@@ -222,14 +248,11 @@ export class CarPhysics {
         const taper = Math.max(0, 1 - (fwdSpeed - FORWARD_MAX_SPEED * 0.85) / (FORWARD_MAX_SPEED * 0.13));
         force *= taper;
       }
-      // 转向时最高时速衰减到 50km/h
-      if (Math.abs(input.steering) > 0.05 && fwdSpeed > TURN_MAX_SPEED * 0.9) {
-        const taper = Math.max(0, 1 - (fwdSpeed - TURN_MAX_SPEED * 0.9) / (TURN_MAX_SPEED * 0.1));
-        force *= taper;
-      }
+      // 过弯限速“50km/h 硬截断 + ramp 刹车”已移除：转向能力改为随速度衰减（maxSteerAt），
+      // 高速过弯靠动力削减与抓地下降自然受限，不再有“撞限速墙”感。
       // 防抬头后翻：PD 反扭矩（等效“防抬头杠”），把车头压回，不损失动力。
-      // 俯仰角必须相对“地面法线”计算：把接触轮子的地形法线平均作为地面朝向，
-      // 否则爬坡时正常的车身俯仰会被当成抬头，猛压车头导致后轮离地、无法爬坡甚至翻车。
+      // 阈值必须低于“前轮悬垂落空”的俯仰角（轮距·半轴距 ≈ 0.023 rad）：
+      // 否则满油门时前轮离地、高速转向完全失效（2026-10-23 实测根因）。
       const groundNormal = new CANNON.Vec3(0, 1, 0);
       let groundCount = 0;
       for (const w of this.vehicle.wheelInfos) {
@@ -242,11 +265,13 @@ export class CarPhysics {
       const up = new CANNON.Vec3(0, 1, 0);
       this.chassis.quaternion.vmult(up, up);
       const pitch = Math.acos(Math.max(-1, Math.min(1, up.dot(groundNormal))));
-      if (pitch > 0.04) {
+      // 阈值 0.03：低于“前轮悬垂落空”的俯仰角（≈0.023 rad 的两倍量级，兼顾斜坡不误伤），
+      // 力度介于原版（90000/4000/15000）与“防前轮离地”更强版本（260000/8000/24000）之间
+      if (pitch > 0.03) {
         const right = new CANNON.Vec3(1, 0, 0);
         this.chassis.quaternion.vmult(right, right);
         const pitchRate = -this.chassis.angularVelocity.dot(right); // 正=抬头速率
-        const counter = Math.min(15000, 90000 * pitch + 4000 * Math.max(0, pitchRate));
+        const counter = Math.min(20000, 160000 * pitch + 8000 * Math.max(0, pitchRate));
         this.chassis.torque.x += right.x * counter;
         this.chassis.torque.y += right.y * counter;
         this.chassis.torque.z += right.z * counter;
@@ -274,19 +299,8 @@ export class CarPhysics {
     const engineBrake = input.throttle === 0 && input.brake === 0
       ? (Math.abs(input.steering) > 0.05 || reversing ? ENGINE_BRAKE : COAST_BRAKE)
       : 0;
-    // 转向限速（50km/h）：除削减动力外，超速时对四轮施加制动，避免低阻尼下无法降速
-    let brake = Math.max(input.brake * BRAKE_FORCE, engineBrake);
-    if (input.throttle > 0 && Math.abs(input.steering) > 0.05) {
-      const fwdSpeed = this.forwardSpeed();
-      if (fwdSpeed > TURN_MAX_SPEED * 0.9) {
-        const over = Math.min(1, (fwdSpeed - TURN_MAX_SPEED * 0.9) / (TURN_MAX_SPEED * 0.1));
-        brake = Math.max(brake, BRAKE_FORCE * over);
-      }
-    }
-    this.vehicle.setBrake(brake, 0);
-    this.vehicle.setBrake(brake, 1);
-    this.vehicle.setBrake(brake, 2);
-    this.vehicle.setBrake(brake, 3);
+    const brake = Math.max(input.brake * BRAKE_FORCE, engineBrake);
+    for (let i = 0; i < 4; i++) this.vehicle.setBrake(brake, i);
 
     this.world.step(this.fixedTimeStep, dt, this.maxSubSteps);
 
@@ -357,12 +371,29 @@ export class CarPhysics {
     return this.vehicle.wheelInfos[index].worldTransform;
   }
 
+  /** 调试用：当前各轮关键状态（接触/悬架力/侧向冲量/滑移标记） */
+  debugWheelStates(): Array<{ isInContact: boolean; suspensionForce: number; sideImpulse: number; skidInfo: number; sliding: boolean; slipAngle: number }> {
+    return this.vehicle.wheelInfos.map((w, i) => ({
+      isInContact: w.isInContact,
+      suspensionForce: w.suspensionForce,
+      sideImpulse: w.sideImpulse,
+      skidInfo: w.skidInfo,
+      sliding: w.sliding,
+      slipAngle: this.vehicle.wheelInfos[i].steering,
+    }));
+  }
+
   getSteering(): number {
     return this.steerCurrent;
   }
 
   getDrifting(): boolean {
     return this.drift;
+  }
+
+  /** 当前车身侧偏角（rad），供 HUD 与调试 */
+  getSlipAngle(): number {
+    return this.computeSlipAngle();
   }
 
   private forwardSpeed(): number {

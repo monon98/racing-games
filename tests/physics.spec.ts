@@ -93,14 +93,20 @@ describe('vehicle physics', () => {
     rig.physics.dispose();
   });
 
-  it('simple: turning caps speed ~50km/h', () => {
+  it('simple: steering authority falls with speed (no corner speed wall)', () => {
     const built = buildTrackForMode('simple');
     const rig = createCarRig(built);
     for (let i = 0; i < 30; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
     for (let i = 0; i < 120; i++) rig.physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
-    for (let i = 0; i < 120; i++) rig.physics.update({ throttle: 0.8, brake: 0, steering: 1 }, 1 / 60);
-    const turnSpeed = rig.physics.getState().absoluteSpeed;
-    check('turning caps speed ~50km/h', turnSpeed < 17, `speed=${(turnSpeed * 3.6).toFixed(0)}km/h`);
+    // 速度敏感转向曲线：低速角大（0.65 rad），高速角小（0.12 rad），中间单调衰减
+    check('steer curve falls with speed', rig.physics.maxSteerAt(0) === 0.65
+      && rig.physics.maxSteerAt(5) > rig.physics.maxSteerAt(25)
+      && rig.physics.maxSteerAt(25) > rig.physics.maxSteerAt(45)
+      && rig.physics.maxSteerAt(45) === 0.12, `low=${rig.physics.maxSteerAt(0)} mid=${rig.physics.maxSteerAt(25)} high=${rig.physics.maxSteerAt(45)}`);
+    // 满舵入弯瞬间不再触发“50km/h 限速墙”（旧逻辑会在 0.2s 内把速度压到 50 以下）
+    for (let i = 0; i < 12; i++) rig.physics.update({ throttle: 1, brake: 0, steering: 1 }, 1 / 60);
+    const entrySpeed = rig.physics.getState().absoluteSpeed;
+    check('no instant corner wall at full lock', entrySpeed > 25, `speed=${(entrySpeed * 3.6).toFixed(0)}km/h`);
     rig.physics.dispose();
   });
 
@@ -120,14 +126,23 @@ describe('vehicle physics', () => {
     rig.physics.dispose();
   });
 
-  it('simple: full-lock jitter enters drift and recovers after release', () => {
+  it('simple: steady full-lock cornering at speed stays stable and recovers', () => {
     const built = buildTrackForMode('simple');
-    const rig = createCarRig(built, true);
+    // 无护栏：避开弯道护栏干扰
+    const rig = createCarRig(built);
     for (let i = 0; i < 30; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
-    for (let i = 0; i < 180; i++) rig.physics.update({ throttle: 1, brake: 0, steering: 1 }, 1 / 60);
-    check('sustained full-lock with throttle enters drift', rig.physics.getDrifting());
-    for (let i = 0; i < 30; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
-    check('drift clears after releasing steering', !rig.physics.getDrifting());
+    // 拉到高速（120 帧 ≈ 2s），再满舵稳态过弯
+    for (let i = 0; i < 120; i++) rig.physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+    for (let i = 0; i < 90; i++) rig.physics.update({ throttle: 1, brake: 0, steering: 1 }, 1 / 60);
+    const st = rig.physics.getState();
+    check('no rollover in steady full-lock corner', st.up.y > 0.6, `up=${st.up.y.toFixed(3)}`);
+    // 稳态推头（understeer）：车身贴轨迹，不会自旋甩飞
+    const slip = rig.physics.getSlipAngle();
+    check('no spin-out in steady full-lock corner', slip < 0.3, `slip=${slip.toFixed(3)}rad`);
+    // 松开转向与油门：侧滑抑制接管，车身回正
+    for (let i = 0; i < 60; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    const afterRelease = rig.physics.getSlipAngle();
+    check('car recovers after releasing steering', afterRelease < 0.1, `slip=${afterRelease.toFixed(3)}rad`);
     rig.physics.dispose();
   });
 
@@ -325,15 +340,16 @@ describe('vehicle physics', () => {
     }
     check('no rollover on rapid steering switch', minUp > 0.5, `min up.y=${minUp.toFixed(3)}`);
     for (let i = 0; i < 30; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 1 }, 1 / 60);
+    const steerAtRelease = Math.abs(rig.physics.getSteering());
     rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
     for (let i = 0; i < 8; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
     const steerAt015s = Math.abs(rig.physics.getSteering());
     for (let i = 0; i < 64; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
     const steerAt12s = Math.abs(rig.physics.getSteering());
     check(
-      'steering returns slowly to center',
-      steerAt015s > 0.2 && steerAt12s < 0.05,
-      `at0.15s=${steerAt015s.toFixed(2)} at1.2s=${steerAt12s.toFixed(2)}`,
+      'steering returns to center in flight (0.15s) and settles by 1.2s',
+      steerAt015s < steerAtRelease && steerAt015s > 0.02 && steerAt12s < 0.05,
+      `release=${steerAtRelease.toFixed(2)} at0.15s=${steerAt015s.toFixed(2)} at1.2s=${steerAt12s.toFixed(2)}`,
     );
     rig.physics.dispose();
   });
