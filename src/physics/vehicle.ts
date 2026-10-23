@@ -26,6 +26,14 @@ const STEER_FALLOFF_SPEED = 45;
 // 质量加重（抗飞起）；发动机力同步提高保持 0-100 约 1.5s（7500×2/750≈20 m/s²）；
 // 倒车约等于旧正向加速：7500 × 0.65 ≈ 4875N/轮
 const ENGINE_FORCE = 7500;
+/** 四驱（2026-10-23 用户要求）：前轴每轮在原后驱力基础上**叠加** force × FRONT_DRIVE_RATIO，
+ *  前轴总驱动力 ≈ 后轴的一半（0.5）。前轮接地时生效（起步/出弯/爬坡明显更有力）；
+ *  前轮悬空时自然回退为纯后驱——cannon-es 急加速重心后移本来就压空前轮（逐帧对照实验证明
+ *  直线全油门时前悬架全程伸长极限），因此直线 0-100 与极速几乎不变。
+ *  倒车+转向例外：四轮全给满力（保持 10 m/s 倒车转向上限行为）。
+ *  所有四轮必须每帧都设置：cannon 的 wheel.engineForce 跨帧残留，漏设会让倒车转向后的动力
+ *  残留到下一帧前进状态（顺带修掉此潜在 bug）。调 0.35 更后偏、0.6 更前偏。 */
+const FRONT_DRIVE_RATIO = 0.5;
 const REVERSE_FORCE_RATIO = 0.65;
 const REVERSE_MAX_SPEED = 8; // m/s ≈ 29 km/h
 /** 倒车+转向时最高倒车速度：10 m/s ≈ 36 km/h */
@@ -312,11 +320,13 @@ export class CarPhysics {
         force = 0;
       }
     }
-    // 后驱：动力给后轮；倒车+转向时也把动力给前轮，避免原地打转，让倒车转弯能加速到上限
-    if (input.throttle < 0 && Math.abs(input.steering) > 0.05) {
-      this.vehicle.applyEngineForce(force, 0);
-      this.vehicle.applyEngineForce(force, 1);
-    }
+    // 四驱：前轴每轮额外叠加 force × FRONT_DRIVE_RATIO（前轮接地时才实际产生推力，前轮悬空
+    // 时自然回退为纯后驱）；倒车+转向时四轮全给满力（保证倒车转弯能加速到 10 m/s 上限，同旧逻辑）。
+    // 四轮每帧必须都设置：cannon 的 wheel.engineForce 跨帧残留，漏设会让上一帧的动力延续。
+    const reverseTurnBoost = input.throttle < 0 && Math.abs(input.steering) > 0.05;
+    const frontForce = reverseTurnBoost ? force : force * FRONT_DRIVE_RATIO;
+    this.vehicle.applyEngineForce(frontForce, 0);
+    this.vehicle.applyEngineForce(frontForce, 1);
     this.vehicle.applyEngineForce(force, 2);
     this.vehicle.applyEngineForce(force, 3);
 

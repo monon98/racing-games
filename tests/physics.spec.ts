@@ -38,9 +38,9 @@ describe('vehicle physics', () => {
     const built = buildTrackForMode(mode);
     const rig = createCarRig(built, true);
     for (let i = 0; i < 30; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
-    // 先直线加速到中高速，再做 S 变向（左 1s → 右 1.5s）：贴近玩家真实操作节奏，
-    // 而不是“持续满舵转圈钉墙”的病态姿态
-    for (let i = 0; i < 120; i++) rig.physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+    // 先直线加速到中高速（~28m/s），再做 S 变向（左 1.5s → 右 1.5s）：贴近玩家真实节奏；
+    // 满舵 S 在 40m/s+ 时任何车都会横向滑出路面（撞护栏贴墙属正常物理，不能作为“S 不响应”判据），故限速进入
+    for (let i = 0; i < 80; i++) rig.physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
     const entrySpeed = rig.physics.getState().absoluteSpeed;
     let minUp = 1;
     let sawLeftYaw = false;
@@ -267,6 +267,36 @@ describe('vehicle physics', () => {
     for (let i = 0; i < 90; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
     const afterRelease = rig.physics.getState().forwardSpeed;
     check('reverse release stops quickly', afterRelease > -1.0, `after release=${afterRelease.toFixed(2)} m/s`);
+    rig.physics.dispose();
+  });
+
+  it('simple: AWD drives all four wheels (front = half share, additive); reverse+turn boosts to full', () => {
+    const built = buildTrackForMode('simple');
+    const rig = createCarRig(built);
+    const vehicle = (rig.physics as unknown as { vehicle: CANNON.RaycastVehicle }).vehicle;
+    for (let i = 0; i < 30; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    rig.physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+    const share = vehicle.wheelInfos.map((w) => Math.abs(w.engineForce));
+    check(
+      'awd: all four wheels driven, front per-wheel = 0.5 × rear',
+      share.every((s) => s > 1000) && share[0] === share[1] && share[2] === share[3]
+        && Math.abs(share[0] - 0.5 * share[2]) < 1,
+      `wheel forces=[${share.map((s) => s.toFixed(0)).join(' / ')}]`,
+    );
+    rig.physics.update({ throttle: -1, brake: 0, steering: 1 }, 1 / 60);
+    const boost = vehicle.wheelInfos.map((w) => Math.abs(w.engineForce));
+    check(
+      'awd: reverse+turn boosts front axle to full force',
+      Math.min(...boost) > share[0] * 1.9 && Math.abs(boost[3] - share[2]) < 1,
+      `boost=[${boost.map((s) => s.toFixed(0)).join(' / ')}] share=[${share[0].toFixed(0)}/${share[2].toFixed(0)}]`,
+    );
+    rig.physics.update({ throttle: 1, brake: 0, steering: 0 }, 1 / 60);
+    const afterBoost = vehicle.wheelInfos.map((w) => Math.abs(w.engineForce));
+    check(
+      'awd: no stale reverse-turn force leaks into next forward frame',
+      afterBoost.every((s, i) => Math.abs(s - share[i]) < 1),
+      `afterBoost=[${afterBoost.map((s) => s.toFixed(0)).join(' / ')}]`,
+    );
     rig.physics.dispose();
   });
 
