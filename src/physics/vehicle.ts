@@ -84,9 +84,12 @@ const DRIFT_MIN_SPEED = 8;
  *  2026-10-23 两端实测：前轴 10（≈2.8g）满舵兜圈+S 变向直接侧翻；角阻尼 1.0（每步清零角速度，
  *  旋转动力学失真）会掩盖滚转问题、表现得“永不翻车”但转向响应迟钝 */
 const GRIP_FRONT = 5;
-const GRIP_REAR = 3.2;
-/** 前轴滑移时抓地滚动衰减（0.2→0.5 rad 间从 5 降到 3.3），甩尾后不至于彻底失控 */
-const GRIP_FRONT_SLIDING = 3.3;
+/** 后轴 3.5（2026-10-26 十字路口可达性 +0.3）：满舵深弯时更快进入稳态弧线、压住陀螺式
+ *  自转起步（实测 3.2 在 15m/s+ 满舵稳定掉速并自转）；漂移阈值/进入行为全部不动 */
+const GRIP_REAR = 3.5;
+/** 前轴滑移时抓地滚动衰减（0.2→0.5 rad 间从 5 降到 3.8）——深弯咬合保留（原 3.3 欠转
+ *  甩出国道是“十字路口过不去”主因之一）；0.5+ 仍显著减弱防失控 */
+const GRIP_FRONT_SLIDING = 3.8;
 const GRIP_ROLL_START = 0.2;
 const GRIP_ROLL_END = 0.5;
 /** 侧滑抑制：侧偏角超过该值（rad）后抑制强度线性衰减到 0（ LooseKey 回正仍有效但不瞬间吸附漂移尾巴） */
@@ -220,8 +223,9 @@ export class CarPhysics {
   /** 速度敏感最大转向角：低速 MAX_STEER_SLOW，高速平滑衰减到 MAX_STEER_FAST */
   maxSteerAt(speed: number): number {
     const t = Math.min(1, Math.max(0, speed) / STEER_FALLOFF_SPEED);
-    // 二次 ease-out：速度前段衰减更快（低速保留灵活性），高速更收敛
-    const eased = 1 - (1 - t) * (1 - t);
+    // 幂 1.7 衰减（2026-10-26 十字路口可达性调优：原二次 ease-out 在速度前段丢角太快，
+    // 低中速欠转；改幂曲线低速多留 ~7%、中速（19.4m/s）多留 ~18%，高速端点不变）
+    const eased = 1 - Math.pow(1 - t, 1.7);
     return MAX_STEER_SLOW + (MAX_STEER_FAST - MAX_STEER_SLOW) * eased;
   }
 
