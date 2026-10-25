@@ -10,6 +10,7 @@
 
 ## localStorage（`src/storage/settings.ts`）
 - 玩家名 `racing.playerName`（默认“玩家 + 5 位随机字母数字”）、颜色 `racing.carColor`、模式 `racing.trackMode`（`preset`/`simple`/`complex`，**默认 preset**）、预设选择 `racing.trackPreset`（仅内置 `PRESET_TRACKS` ID，非法回落第一个）。
+- 音效静音 `racing-audio-muted`（`'1'`/`'0'`，`src/audio/engine.ts` 的 `readMutedPref`/`writeMutedPref` 读写；try/catch 包裹，存储不可用降级仅会话生效）。
 
 ## GLTF/GLB 往返（`src/track/gltf.ts`）
 - 导出：`GLTFExporter.parseAsync(group, { binary: true })`；赛道数据写入 `group.userData`（type=`racing-game-track`、meta、roadWidth、barrierHeight、centerline），GLTFExporter 会序列化到 extras，GLTFLoader 会还原到 `scene.userData`。

@@ -279,3 +279,10 @@
 - 测试：新增 `tests/barrier-collision.spec.ts` 四场景固化（穿透 <1m、弹跳 <4~6m/s、upMin>0.6）；vitest 排错记录：cannon-es 的 Body 上 `shape` 属性不是最高效路径，`shapes[0]` 才是数组（曾报 undefined）。
 - known-issues #1 状态改为“2026-10-25 大幅缓解”，遗留不确定性（复杂地形贴坡护栏组合）由人工试驾继续盯。
 - 门禁：typecheck / 46 用例 / build 全过。
+
+## 2026-10-25 音效（用户选定六项中的批 3）
+- src/audio/engine.ts（零新依赖，WebAudio 纯合成）：①引擎声——双锯齿轻微失谐 + 三角次低音 → 低通（750→2650Hz 随负载开合）→ 引擎增益；音高 60Hz（怠速）→ ≈225Hz（极速，speedNorm 线性）× 油门 +20%；音量 = 0.05 + 0.05×速度 + 0.06×油门（封顶 0.17）。②碰撞闷响——带通白噪爆点（140-360Hz 随冲击），峰值 min(0.5, 0.08+impact×0.012)，0.22s 指数衰减；在 onBarrierCollide（≥6 m/s 冲击阈值同震动反馈）内触发。③漂移啸叫——2100Hz 带通循环噪声，随 drift 状态淡入淡出。
+- 接线：Game 构造（首页“开始游戏”**用户手势链路内**）audio.init()（浏览器 autoplay 政策要求）；tick 活动分支 update(speed, throttle, drifting)；空格暂停/结算面板 setPaused(true)（引擎+啸叫自动静音，暂停不再空鸣）；撞墙回调 impact()；dispose ctx.close()。
+- 静音按钮：HUD 右上 🔊/🔇（hud-back 左侧，right:118px），状态存 localStorage racing-audio-muted，刷新保持。
+- vitest 兼容：AudioContext 不存在时（node 环境）全方法 no-op，readMutedPref 有 typeof + try/catch 守卫——实例化不炸（46 用例仍绿）。
+- 门禁：typecheck / 46 用例 / build 全过。浏览器人工验收项：进入游戏听到引擎声随速度/油门变化、撞护栏有闷响+画面震动、漂移有啸叫、🔊 按钮可静音、刷新静音状态保持。

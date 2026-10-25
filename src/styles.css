@@ -480,6 +480,18 @@ select {
   backdrop-filter: blur(6px);
 }
 
+.hud-audio {
+  position: absolute;
+  top: 18px;
+  right: 118px;
+  width: 44px;
+  pointer-events: auto;
+  font-size: 18px;
+  background: rgb(16 20 27 / 0.72);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  backdrop-filter: blur(6px);
+}
+
 .hud-minimap {
   position: absolute;
   right: 18px;

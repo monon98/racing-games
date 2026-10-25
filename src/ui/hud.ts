@@ -22,6 +22,8 @@ export interface HudRefs {
   showResult(result: HudResult): void;
   onBack(cb: () => void): void;
   onRestart(cb: () => void): void;
+  onToggleMute(cb: () => void): void;
+  setMuteIcon(muted: boolean): void;
 }
 
 export function createHUD(container: HTMLElement): HudRefs {
@@ -37,6 +39,7 @@ export function createHUD(container: HTMLElement): HudRefs {
         <div id="hud-drift" class="hud-drift hidden">漂移失控中，松开转向恢复</div>
       </div>
       <button id="hud-back" class="btn hud-back">返回首页</button>
+      <button id="hud-audio" class="btn hud-audio">🔊</button>
       <canvas id="hud-minimap" class="hud-minimap" width="230" height="230"></canvas>
       <div class="hud-hint">WASD / 方向键 驾驶　·　空格 暂停</div>
       <div id="pause-overlay" class="hud-overlay hidden">
@@ -66,13 +69,16 @@ export function createHUD(container: HTMLElement): HudRefs {
   const resultEl = container.querySelector<HTMLElement>('#result-overlay')!;
   const minimap = container.querySelector<HTMLCanvasElement>('#hud-minimap')!;
   const backBtn = container.querySelector<HTMLButtonElement>('#hud-back')!;
+  const audioBtn = container.querySelector<HTMLButtonElement>('#hud-audio')!;
   const resultTimeEl = container.querySelector<HTMLElement>('#result-time')!;
   const resultPenaltyEl = container.querySelector<HTMLElement>('#result-penalty')!;
 
   let backCb: (() => void) | null = null;
   let restartCb: (() => void) | null = null;
+  let muteCb: (() => void) | null = null;
 
   backBtn.addEventListener('click', () => backCb?.());
+  audioBtn.addEventListener('click', () => muteCb?.());
   container.querySelector('#result-back')!.addEventListener('click', () => backCb?.());
   container.querySelector('#result-restart')!.addEventListener('click', () => restartCb?.());
 
@@ -106,6 +112,12 @@ export function createHUD(container: HTMLElement): HudRefs {
     },
     onRestart(cb) {
       restartCb = cb;
+    },
+    onToggleMute(cb) {
+      muteCb = cb;
+    },
+    setMuteIcon(muted) {
+      audioBtn.textContent = muted ? '🔇' : '🔊';
     },
   };
 }

@@ -1,5 +1,6 @@
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
+import { AudioSystem } from '../audio/engine';
 import { buildCar, type CarVisual } from '../car/createCar';
 import {
   DISTANCE_PENALTY_SEC_PER_M,
@@ -36,6 +37,7 @@ export class Game {
   private readonly car: CarVisual;
   private readonly physics: CarPhysics;
   private readonly hud: HudRefs;
+  private readonly audio = new AudioSystem();
   private readonly opts: GameOptions;
 
   private readonly keys = new Set<string>();
@@ -108,6 +110,7 @@ export class Game {
     this.physics.onBarrierCollide = (impact) => {
       if (impact < 6) return;
       this.shake = Math.min(0.5, 0.12 + impact * 0.008);
+      this.audio.impact(impact);
       this.flashEl.classList.remove('active');
       void this.flashEl.offsetWidth; // 重启动画
       this.flashEl.classList.add('active');
@@ -135,6 +138,13 @@ export class Game {
     this.hud = createHUD(container);
     this.hud.onBack(() => opts.onBack());
     this.hud.onRestart(() => opts.onRestart());
+    // 音效：用户手势 context（构造在首页“开始游戏”点击内调用）+ 静音按钮状态
+    this.audio.init();
+    this.hud.setMuteIcon(this.audio.isMuted());
+    this.hud.onToggleMute(() => {
+      this.audio.setMuted(!this.audio.isMuted());
+      this.hud.setMuteIcon(this.audio.isMuted());
+    });
 
     this.onKeyDown = (e) => {
       if (e.code === 'Space') {
@@ -142,6 +152,7 @@ export class Game {
         if (!this.finished) {
           this.paused = !this.paused;
           this.hud.showPause(this.paused);
+          this.audio.setPaused(this.paused);
         }
         return;
       }
@@ -197,6 +208,7 @@ export class Game {
       const input = this.computeInput(this.physics.getState());
       this.physics.update(input, dt);
       state = this.physics.getState();
+      this.audio.update(state.absoluteSpeed, input.throttle, this.physics.getDrifting());
       this.syncVisual(state);
       this.updateRules(state, dt);
     } else {
@@ -357,6 +369,7 @@ export class Game {
       date: Date.now(),
     });
     this.hud.showResult({ lapTimeMs, timePenaltyMs: this.timePenaltyMs, distancePenaltyM: this.distancePenaltyM });
+    this.audio.setPaused(true);
   }
 
   private updateCamera(dt: number, state: ReturnType<CarPhysics['getState']>): void {
@@ -379,6 +392,7 @@ export class Game {
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('resize', this.onResize);
     this.physics.dispose();
+    this.audio.dispose();
     this.renderer.dispose();
     this.container.innerHTML = '';
   }
