@@ -23,6 +23,11 @@ export const BARRIER_HEIGHT_FACTOR = 1.1;
 /** 护栏厚度（加大碰撞判定范围，防高速穿透） */
 export const BARRIER_THICKNESS = 0.8;
 
+/** 护栏**碰撞盒**向远离路面方向额外加厚的深度（可见面与前内侧面不变）：
+ *  高速 55m/s 下每物理步位移 ≈0.92m，更深的外侧碰撞体让未接住的接触面在下一步仍保持重叠，
+ *  求解器持续修正而不是让车身滑过薄体；纯隐形体积（埋在路外），不改变碰撞反馈位置。 */
+export const BARRIER_COLLIDER_DEPTH_EXTRA = 0.8;
+
 /** 每次重生固定时间惩罚（ms） */
 export const TIME_PENALTY_MS = 3000;
 
