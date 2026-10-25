@@ -1,4 +1,4 @@
-﻿import * as CANNON from 'cannon-es';
+import * as CANNON from 'cannon-es';
 import { CAR } from '../config';
 
 export interface VehicleInput {
