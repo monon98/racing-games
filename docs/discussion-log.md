@@ -292,3 +292,12 @@
 - 结果：主入口 55.3KB（gzip 19.2KB，原 >500kB）、vendor-cannon 99.0KB（gzip 28.7KB）、vendor-three 666.3KB（gzip 169.0KB，库本体）；chunkSizeWarningLimit 调至 750 —— vendor-three 独立成包后“>500kB”警告对它已无 actionable 意义（进一步只剩路由级动态 import，游戏单页无意义）。
 - middleware 依赖顺序：index.html 直接引用入口 JS，三个包并行下载；vendor 包内容随依赖版本变化才失效缓存，长期缓存友好。
 - 门禁：build 无警告 / typecheck / 46 用例全过。
+
+## 2026-10-25 更多预设赛道（用户选定六项中的批 5）
+- 新增两条官方预设（控制点数据，首页下拉数据驱动自动出现）：
+  1. 落日余晖 sunfall-sweep（seed 31415，length 1800m）：13 点大半径高速环道，西侧 [−250,10]→[−180,60]→[−230,130] 一组顺滑回旋弯。
+  2. 回旋花廊 windmill-corridor（seed 27182，length 1400m）：13 点双发卡回旋（x≈±90 缩进）+ 底部直道 [60,−150]→[−60,−150]，紧凑技术环。
+- 设计经验：Catmull-Rom(0.6) 对控制点序列的平滑让“发卡钩形”不自交——本组控制点实测最大逐步航向变化 0.079rad（1.2m 采样），远低于 simple 轨 0.3rad 的 zigzag 判据；scaleLoop 把采样环精确缩放到 length（1800/1400 命中 ±0m）。
+- 实测指标驱动了永久断言阈值：非邻接最近间距 42（极光）/34（余晖）/32（花廊）m → 断言 >25m 留裕度（可拦未来误改自交/贴环）；长度 |total−target|<1m；两次构建前 30 点逐位一致（确定性）；静止 30 帧 ≥3 轮接地冒烟。
+- track.spec.ts 新增 describe('preset tracks')：registry 1 条（id/名字唯一、aurora 仍为默认回退）+ it.each 每预设 5 检查；排错记录：track.spec 此前未导入 createCarRig，补 import 后 11/11 绿。
+- 门禁：typecheck / 50 用例 / build 全过。人工验收项（浏览器）：首页下拉出三条预设、选择后进场布局正确、各预设计时与排行榜隔离（presetId 区分）。

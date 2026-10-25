@@ -5,7 +5,7 @@
 ## 赛道来源两类（2026-10-22 预设制改造）
 - **preset（默认）**：官方预设，控制点数据固定在 `src/track/presets.ts`；`generatePresetTrack(meta)` 用 `getPresetTrack(meta.presetId)`（无效 ID 回退第一个预设）→ `samplePresetCenterline`（Catmull-Rom 0.6，间距 1.2m 采样）→ `scaleLoop` 缩放到 `preset.length`；自交则抛错（预设数据错误必须显式失败，不换形状）。相同 presetId 输出逐点一致（确定性测试保证）。
 - preset 模式走**平地管线**：无地形、无限 Plane 地面，与 simple 相同（`buildTrack` 内 `meta.mode !== 'complex'` 判断）。
-- 新增预设：`PRESET_TRACKS` 追加条目（id/name/description/length/seed/controls），首页预设下拉数据驱动自动出现；**id 发布后不可更改**（leaderboard/存档/GLB 都引用 presetId）。
+- 新增预设：`PRESET_TRACKS` 追加条目（id/name/description/length/seed/controls），首页预设下拉数据驱动自动出现；**id 发布后不可更改**（leaderboard/存档/GLB 都引用 presetId）。**2026-10-25 花名册**：`aurora-ring` 极光环道（默认，1800m）/ `sunfall-sweep` 落日余晖（1800m 大半径高速环+左侧回旋）/ `windmill-corridor` 回旋花廊（1400m 双发卡回旋+底部直道）。逐预设永久回归在 tests/track.spec.ts（确定性逐位一致、长度 ±1m、逐步航向 <0.25rad、非邻接最近间距 >25m——实测最窄 32m，发卡不自交的静态后备防线、可驾驶冒烟 ≥3 轮接地）；设计新预设时控制点环路两段的最近间距须 ≳16m（2×8.4m 全加宽半宽 + 安全边距）。
 - 本地文件预设已**收回**（2026-10-22 用户决策）：不提供用户导入预设的 UI 入口；本地预设定为**代码文件定义**（编辑 `src/track/presets.ts`），IndexedDB `presets` store 已随 DB v3 升级删除。
 - **本地 GLB 预设（public 目录方案，2026-10-22 定版）**：`.glb` 放 `public/presets/` + `index.json` 登记 → `src/track/localPresets.ts` 运行时读取（`base()` 用 `import.meta.env.BASE_URL` 兼容 Pages 子路径）；`gltf.ts` 提供 `importTrackFromUrl` / `trackPackageFromGltf`（metaOverride）；`loadLocalPresetTrack` 覆盖 meta：`mode='preset'`、`presetId='local-<文件名安全化>'`（`localPresetIdFor`，同名跨部署同 ID）、`seed=0`（环境确定）。`StartPage` 清单驱动下拉（data-local），激活 = 解析包 → 新 id → `replaceActiveTrack`（清榜）；清单为空/缺失 = 仅有内置列表。
 - 环境 `meta.seed` 在 preset 模式使用 `preset.seed`（预设外观稳定）；自定义仍为随机种子。

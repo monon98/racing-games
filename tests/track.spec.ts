@@ -3,7 +3,8 @@ import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
 import { CAR } from '../src/config';
 import { buildTrack, findSafeSpawnIndex, generateCenterlinePoints, loopSelfIntersects } from '../src/track/generator';
-import { buildTrackForMode, check, makeMeta } from './helpers';
+import { PRESET_TRACKS } from '../src/track/presets';
+import { buildTrackForMode, check, createCarRig, makeMeta } from './helpers';
 
 function maxHeadingTurn(points: { x: number; z: number }[], tangents: { x: number; z: number }[]): number {
   let maxTurn = 0;
@@ -18,6 +19,73 @@ function maxHeadingTurn(points: { x: number; z: number }[], tangents: { x: numbe
   }
   return maxTurn;
 }
+
+describe('preset tracks', () => {
+  it('registry: stable unique ids/names, first entry is the default', () => {
+    const ids = PRESET_TRACKS.map((p) => p.id);
+    check('>=3 presets', PRESET_TRACKS.length >= 3, String(PRESET_TRACKS.length));
+    check('ids unique', new Set(ids).size === ids.length, ids.join(','));
+    check('names unique', new Set(PRESET_TRACKS.map((p) => p.name)).size === PRESET_TRACKS.length);
+    check('mature preset first (default fallback)', PRESET_TRACKS[0].id === 'aurora-ring');
+    for (const p of PRESET_TRACKS) {
+      check(`${p.id}: seed set`, Number.isInteger(p.seed) && p.seed > 0);
+      check(`${p.id}: length plausible`, p.length >= 1000 && p.length <= 2600, String(p.length));
+      check(`${p.id}: controls enough`, p.controls.length >= 6, String(p.controls.length));
+    }
+  });
+
+  it.each(PRESET_TRACKS.map((p) => [p.id, p] as const))('%s: deterministic build, smooth, clear of itself, drivable', (_id, preset) => {
+    // 游戏同路径：preset 元数据 → generatePresetTrack（缩放到目标长度 + 自交守卫）
+    const built = buildTrackForMode('preset', 0, preset.id);
+    const pts = built.points;
+    check(
+      `${preset.id}: total = target length`,
+      Math.abs(built.totalLength - preset.length) < 1,
+      `${built.totalLength.toFixed(1)} vs ${preset.length}`,
+    );
+    check(`${preset.id}: no self-intersection`, !loopSelfIntersects(pts));
+    // 相邻采样方向变化小（1.2m 采样下发卡也 <0.08rad/步，实测上限 0.079）
+    let maxTurn = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const j = (i + 1) % pts.length;
+      const h0 = Math.atan2(built.tangents[i].x, built.tangents[i].z);
+      const h1 = Math.atan2(built.tangents[j].x, built.tangents[j].z);
+      let dh = h1 - h0;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      maxTurn = Math.max(maxTurn, Math.abs(dh));
+    }
+    check(`${preset.id}: smooth per-step heading`, maxTurn < 0.25, `maxTurn=${maxTurn.toFixed(3)}rad`);
+    // 远距离最近间距要放得下两条路（含弯道加宽）：实测最窄 32m，阈值 25 留裕度；
+    // 圆周方向 60 采样（72m 弧长）内不算——那是同一条路的相邻点
+    let minClear = Infinity;
+    const arcGap = 60;
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + arcGap; j < pts.length; j++) {
+        const dj = j - i;
+        if (Math.min(dj, pts.length - dj) < arcGap) continue;
+        const d = Math.hypot(pts[i].x - pts[j].x, pts[i].z - pts[j].z);
+        minClear = Math.min(minClear, d);
+      }
+    }
+    check(
+      `${preset.id}: parallel passes clear road+widening`,
+      minClear > 25,
+      `minClear=${minClear.toFixed(1)}m`,
+    );
+    // 确定性：同预设两次构建位图一致（布局永不随版本漂移）
+    const again = buildTrackForMode('preset', 0, preset.id);
+    const j0 = pts.slice(0, 30).map((p) => `${p.x.toFixed(6)},${p.z.toFixed(6)}`).join('|');
+    const j1 = again.points.slice(0, 30).map((p) => `${p.x.toFixed(6)},${p.z.toFixed(6)}`).join('|');
+    check(`${preset.id}: deterministic`, j0 === j1);
+    // 可驾驶冒烟：静止 30 帧后 ≥3 轮接地（不在空中挂死/不陷地）
+    const rig = createCarRig(built);
+    for (let i = 0; i < 30; i++) rig.physics.update({ throttle: 0, brake: 0, steering: 0 }, 1 / 60);
+    const contacts = rig.physics.debugWheelStates().filter((w) => w.isInContact).length;
+    check(`${preset.id}: car settles on ground`, contacts >= 3, `contacts=${contacts}`);
+    rig.physics.dispose();
+  });
+});
 
 describe('track generation', () => {
   it('simple track: smooth, self-intersection free, correctly sized', () => {
