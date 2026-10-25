@@ -59,7 +59,8 @@ export function createSkyDome(radius = 1500): THREE.Mesh {
 /** 色调映射管线：ACES + 曝光 1.05；阴影类型保持 PCF（比 PCFSoft 边缘更稳，少闪烁） */
 export function applyColorPipeline(renderer: THREE.WebGLRenderer): void {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  // 曝光：全局明暗唯一旋钮。初值 1.05，2026-10-25 用户验收反馈偏亮 → 0.85
+  renderer.toneMappingExposure = 0.85;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
 }

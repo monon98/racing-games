@@ -59,12 +59,15 @@ const ENGINE_BRAKE = 50;
 const COAST_BRAKE = 4;
 /** 四轮全离地时的上升速度上限（m/s）：只防止极端弹射，下落完全交给重力 */
 const MAX_AIR_UPWARD_SPEED = 2.0;
-/** 松左右键后轮子回中速度（慢）；按住转向时响应速度（快）；均随速度再加成（STEER_SPEED_BONUS） */
-const STEER_RETURN_RATE = 5.5;
-const STEER_APPLY_RATE = 7;
-/** 高速时打角/回正的额外速率：45m/s 时打角≈15/s、回正≈13.5/s，0.1s 内完成变向，
- *  避免转向角拖着前轮冲量用 yaw 惯量甩尾（2026-10-23 实测满锁松手 0.25s 滞留导致大侧偏） */
-const STEER_SPEED_BONUS = 8;
+/** 转向梯形速度曲线（2026-10-25 用户反馈“左右向控制不够顺滑”，替换指数平滑）：
+ *  指数式起步一帧吃 11.7% 满锁（键盘点按“猛一拽”）、收敛带长尾（松手黏、换向过零段最慢）。
+ *  跟踪器三约束：v ≤ VMAX（匀速中段）、|dv| ≤ ACCEL·dt（软启动，首帧位移 ≈ a·dt²/2 ≈0.005rad）、
+ *  v ≤ √(2·ACCEL·剩余角)（二次制动，零过冲贴齐）。全锁 0.65rad ≈0.26s 到位。 */
+const STEER_SLEW_VMAX = 4.2; // rad/s 基准（满锁 0.65rad 需 ~0.15s 匀速），随速度再加成
+const STEER_SLEW_ACCEL = 38; // rad/s² 起/减速共同限——“顺滑度”的主旋钮
+/** 高速 vmax 加成：45m/s 时 vmax×2.3 ≈9.7 → 高速目标角小（0.12rad）近乎即时到位，
+ *  沿用旧设计动机：松键后转向角不在前轮冲量上多停留，利用 yaw 惯量甩尾（2026-10-23 教训） */
+const STEER_SLEW_SPEED_POWER = 1.3;
 /** 底盘原点在静止时的离地高度（|连接点y| 0.24 + 悬架静止长 0.38 + 轮半径 0.4 = 1.02，+0.03 落差），重生/出生用 */
 export const CHASSIS_SPAWN_HEIGHT = 1.05;
 /** 碰撞回弹：撞护栏后沿接触法线立即反弹的比例（restitution） */
@@ -117,6 +120,8 @@ export class CarPhysics {
   /** 本步内最强的一次护栏接触（在 step 后统一施加回弹） */
   private barrierHit: { body: CANNON.Body; normal: CANNON.Vec3; impact: number } | null = null;
   private steerCurrent = 0;
+  /** 转向轮角速度（梯形跟踪器状态，reset 清零） */
+  private steerVel = 0;
   /** 油门缓入状态：平滑后的踏板量（0-1，reset 归零） */
   private throttleActual = 0;
   private drift = false;
@@ -231,16 +236,40 @@ export class CarPhysics {
     return Math.atan2(Math.abs(v.dot(right)), fwdComp);
   }
 
+  /**
+   * 转向梯形速度曲线跟踪器（rad、rad/s 态机）：
+   * 目标角速度受三约束：|v| ≤ vmax（速度门随速加成）、v 不超过 √(2·a·剩余角)
+   * （恰好停在目标 → 无过冲）、|Δv| ≤ a·dt（限加速度 → 软启动/软停止）。
+   * 打角与回正共用同一跟踪器（松手回正同样受制动约束，不再"匀速冲到 0 再突停"）。
+   */
+  private trackSteer(target: number, dt: number): void {
+    const diff = target - this.steerCurrent;
+    if (Math.abs(diff) < 1e-5) {
+      this.steerCurrent = target;
+      this.steerVel = 0; // 贴齐即清残留速度，避免下一步轻推轮角
+      return;
+    }
+    const speedT = Math.min(1, Math.max(0, this.forwardSpeed()) / STEER_FALLOFF_SPEED);
+    const vmax = STEER_SLEW_VMAX * (1 + STEER_SLEW_SPEED_POWER * speedT);
+    const goalVel = Math.sign(diff) * Math.min(vmax, Math.sqrt(2 * STEER_SLEW_ACCEL * Math.abs(diff)));
+    const dvMax = STEER_SLEW_ACCEL * dt;
+    this.steerVel += Math.max(-dvMax, Math.min(dvMax, goalVel - this.steerVel));
+    const next = this.steerCurrent + this.steerVel * dt;
+    // 数值兜底：越目标即贴齐并把速度清零（正常被制动约束自然拦下，罕见于积分量化边界）
+    if ((next - target) * diff >= 0 || Math.abs(next - target) < 1e-5) {
+      this.steerCurrent = target;
+      this.steerVel = 0;
+      return;
+    }
+    this.steerCurrent = next;
+  }
+
   update(input: VehicleInput, dt: number): void {
     // 转向角随速度衰减（速度敏感转向）：低速灵活，高速收敛
     const targetSteer = input.steering * this.maxSteerAt(Math.max(0, this.forwardSpeed()));
-    // 打角/回正速率都随速度自适应：低速允许从容，高速必须快——
-    // 否则松键后转向角在前轮冲量上多停留 0.2s+，利用 yaw 惯量把车甩进大侧偏（“S 转不过来、松手甩尾”的另一根源）
-    const steerSpeedT = Math.min(1, Math.max(0, this.forwardSpeed()) / STEER_FALLOFF_SPEED);
-    const steerRate = targetSteer !== 0
-      ? STEER_APPLY_RATE + STEER_SPEED_BONUS * steerSpeedT
-      : STEER_RETURN_RATE + STEER_SPEED_BONUS * steerSpeedT;
-    this.steerCurrent += (targetSteer - this.steerCurrent) * Math.min(1, steerRate * dt);
+    // 梯形跟踪：打角/回正统一走"角加速度受限 + vmax + 二次制动"速度曲线（常量区注释）；
+    // 高速 vmax 加成沿用旧设计动机——松键后转向角不在前轮冲量上多停留（yaw 惯量甩尾根源）
+    this.trackSteer(targetSteer, dt);
 
     // 油门缓入：踏板指令指数平滑后再进入动力计算（起步不窜、四驱前轴咬合更稳）；松油门回零更快
     const throttleRate = input.throttle !== 0 ? THROTTLE_RAMP_RATE : THROTTLE_RAMP_RATE * 2.5;
@@ -471,6 +500,7 @@ export class CarPhysics {
     this.chassis.velocity.setZero();
     this.chassis.angularVelocity.setZero();
     this.throttleActual = 0;
+    this.steerVel = 0;
     this.barrierHit = null;
     for (let i = 0; i < this.vehicle.wheelInfos.length; i++) {
       this.vehicle.updateWheelTransform(i);
