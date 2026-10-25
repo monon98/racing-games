@@ -4,6 +4,7 @@ import { CAR } from '../config';
 import { buildCar } from '../car/createCar';
 import { CHASSIS_SPAWN_HEIGHT } from '../physics/vehicle';
 import type { BuiltTrack } from '../track/generator';
+import { applyColorPipeline, bakeEnvironment, createSkyDome, createSunFollower, type SunFollower } from '../render/lighting';
 
 export interface TrackPreviewOptions {
   /** 自由镜头：OrbitControls（拖动旋转/右键平移/滚轮缩放）；默认 false = 环绕慢转 */
@@ -32,6 +33,7 @@ export class TrackPreview {
   private readonly freeCamera: boolean;
   private controls: OrbitControls | null = null;
   private viewMode: PreviewView;
+  private readonly sunFollower: SunFollower;
 
   constructor(container: HTMLElement, track: BuiltTrack, carColor: string, options: TrackPreviewOptions = {}) {
     this.container = container;
@@ -42,14 +44,19 @@ export class TrackPreview {
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
+    // 与游戏页同一渲染管线：ACES 色管 + 天空穹顶 + 天光反射 + 纹素对齐阴影
+    applyColorPipeline(this.renderer);
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.className = 'preview-canvas';
 
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x5a6a55, 1.0));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-    sun.position.set(120, 180, 80);
-    this.scene.add(sun);
+    this.scene.add(createSkyDome(1500));
+    this.scene.add(new THREE.HemisphereLight(0xbfd9ff, 0x6d7f66, 0.65));
+    const env = bakeEnvironment(this.renderer);
+    if (env) {
+      this.scene.environment = env;
+      this.scene.environmentIntensity = 0.5;
+    }
+    this.sunFollower = createSunFollower(this.scene);
 
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 3000);
     this.scene.add(this.track.group);
@@ -150,6 +157,8 @@ export class TrackPreview {
       this.radius = 26;
       this.height = 16;
     }
+    // 太阳焦点跟随取景中心：近景窄视锥（阴影更细），全景按包围盒自适应宽视锥
+    this.sunFollower.update(this.center, this.viewMode === 'car' ? 110 : Math.max(400, this.radius * 1.6 + 80));
     if (this.freeCamera && this.viewMode === 'car') {
       // 自由镜头下从车头方向观察赛车，避免初始视角看到车尾（“倒着”）
       const t = this.track.tangents[0];
@@ -194,6 +203,9 @@ export class TrackPreview {
     this.controls?.dispose();
     this.renderer.setAnimationLoop(null);
     window.removeEventListener('resize', this.onResize);
+    this.sunFollower.dispose();
+    this.scene.environment?.dispose();
+    this.scene.environment = null;
     this.renderer.dispose();
     this.container.innerHTML = '';
   }

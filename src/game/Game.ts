@@ -12,6 +12,7 @@ import {
   WRONG_WAY_HOLD_MS,
 } from '../config';
 import { CarPhysics, CHASSIS_SPAWN_HEIGHT, type VehicleInput } from '../physics/vehicle';
+import { SKY_HORIZON, applyColorPipeline, bakeEnvironment, createSkyDome, createSunFollower, type SunFollower } from '../render/lighting';
 import { addLeaderboardEntry } from '../storage/db';
 import { findSafeSpawnIndex, type BuiltTrack } from '../track/generator';
 import { createHUD, type HudRefs } from '../ui/hud';
@@ -31,7 +32,8 @@ export class Game {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
-  private readonly sun: THREE.DirectionalLight;
+  private readonly sunFollower: SunFollower;
+  private readonly sunFocus = new THREE.Vector3();
   private readonly clock = new THREE.Clock();
   private readonly track: BuiltTrack;
   private readonly car: CarVisual;
@@ -66,32 +68,28 @@ export class Game {
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
-    // PCF 比 PCFSoft 边缘更稳定，减少阴影闪烁
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // 色彩管线：ACES 色调映射 + 曝光；阴影保持 PCF（共享管线与预览页一致）
+    applyColorPipeline(this.renderer);
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.className = 'game-canvas';
 
-    this.scene.background = new THREE.Color(0x87bceb);
-    this.scene.fog = new THREE.Fog(0x87bceb, 260, 1100);
+    // 天空渐变穹顶 + 与地平线同色的线性雾（远处物体渐隐融入天际线）
+    this.scene.fog = new THREE.Fog(SKY_HORIZON, 260, 1100);
+    this.scene.add(createSkyDome(1500));
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
     this.camera.position.set(0, 6, 20);
     this.camera.lookAt(0, 0, 0);
 
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6d7f66, 1.05));
-    this.sun = new THREE.DirectionalLight(0xffffff, 1.6);
-    this.sun.position.set(120, 180, 80);
-    this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
-    // 阴影相机跟随车辆，避免车辆在固定阴影图上跨纹素导致阴影抖动
-    this.sun.shadow.camera.left = -90;
-    this.sun.shadow.camera.right = 90;
-    this.sun.shadow.camera.top = 90;
-    this.sun.shadow.camera.bottom = -90;
-    this.sun.shadow.camera.far = 500;
-    this.scene.add(this.sun);
-    this.scene.add(this.sun.target);
+    // 环境光：半球补光 + PMREM 天光（车身金属反射不再死黑；强度与 ACES 重配）
+    this.scene.add(new THREE.HemisphereLight(0xbfd9ff, 0x6d7f66, 0.65));
+    const env = bakeEnvironment(this.renderer);
+    if (env) {
+      this.scene.environment = env;
+      this.scene.environmentIntensity = 0.5;
+    }
+    // 太阳：阴影相机纹素对齐跟随（update 与光偏移都吸附网格，消除亚像素抖动）
+    this.sunFollower = createSunFollower(this.scene);
 
     this.scene.add(track.group);
     this.car = buildCar(opts.carColor);
@@ -215,9 +213,9 @@ export class Game {
       state = this.physics.getState();
     }
 
-    // 平行光与阴影相机跟随车辆（保持偏移），大幅减轻阴影抖动
-    this.sun.position.set(state.position.x + 120, state.position.y + 180, state.position.z + 80);
-    this.sun.target.position.set(state.position.x, state.position.y, state.position.z);
+    // 太阳阴影相机跟随车辆（焦点吸附阴影纹素网格，阴影边缘零亚像素抖动）
+    this.sunFocus.set(state.position.x, state.position.y, state.position.z);
+    this.sunFollower.update(this.sunFocus);
 
     this.updateCamera(dt, state);
     this.hud.update({
@@ -393,6 +391,9 @@ export class Game {
     window.removeEventListener('resize', this.onResize);
     this.physics.dispose();
     this.audio.dispose();
+    this.sunFollower.dispose();
+    this.scene.environment?.dispose();
+    this.scene.environment = null;
     this.renderer.dispose();
     this.container.innerHTML = '';
   }

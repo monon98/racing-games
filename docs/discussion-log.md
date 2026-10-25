@@ -301,3 +301,16 @@
 - 实测指标驱动了永久断言阈值：非邻接最近间距 42（极光）/34（余晖）/32（花廊）m → 断言 >25m 留裕度（可拦未来误改自交/贴环）；长度 |total−target|<1m；两次构建前 30 点逐位一致（确定性）；静止 30 帧 ≥3 轮接地冒烟。
 - track.spec.ts 新增 describe('preset tracks')：registry 1 条（id/名字唯一、aurora 仍为默认回退）+ it.each 每预设 5 检查；排错记录：track.spec 此前未导入 createCarRig，补 import 后 11/11 绿。
 - 门禁：typecheck / 50 用例 / build 全过。人工验收项（浏览器）：首页下拉出三条预设、选择后进场布局正确、各预设计时与排行榜隔离（presetId 区分）。
+
+## 2026-10-25 光影细化（用户追加选定）
+- 共享管线 src/render/lighting.ts：Game 与 TrackPreview 都改为同源配置，阻止两页观感漂移。
+- 色彩管线：ACESFilmic + 曝光 1.05（原 NoToneMapping 直出，高亮无 rolloff）；太阳暖色 0xfff2e0 强度 2.0、半球 0xbfd9ff/0x6d7f66 按管线重配（原 1.6/1.05 是无色管数值）；scene.environmentIntensity = 0.5（three r163+ 的全局环境强度，车身 metalness 0.55 从死黑获得天光反射）。
+- 天空穹顶：96×48 球体 + 逐顶点渐变色（天顶 0x427fd4 → 地平线 0xcfe9ff；下半球向 0x87a86d 地色），内置 MeshBasicMaterial 保证走 three 的色调映射与 sRGB 输出链路（自写 ShaderMaterial 不含 tonemapping/colorspace chunk 会绕过管线——坑：自定义 shader 直出颜色与内置材质色调不一致）；fog:false + frustumCulled false + renderOrder −1。雾色 = 地平线色，远处物体渐隐与天际无缝。
+- 太阳纹素对齐（根治移车阴影边缘亚像素抖动——此前只“跟随”未“对齐”）：
+  1. 光空间正交基由恒定光轴 SUN_OFFSET=(120,180,80) 推导（X = UP×viewDir，Y = viewDir×X）；焦点在 X/Y 轴上投影值吸附到 texel = 视锥宽/2048（默认 180/2048 ≈ 0.088m）网格，Z（深度轴）不吸附。
+  2. 光位置 = 吸附后焦点 + SUN_OFFSET（偏移向量恒定 ⇒ 相机屏幕轴逐帧位移保持整纹素平移，贴图内容不再在纹素间漂移）。
+  3. 支持 update(focus, frustumSize?) 动态视锥：预览页 car 近景 110m、scene 全景 max(400, radius×1.6+80)——同一视角内保持恒定网格才稳定；texel 随视锥重算，切换后 grid 一次性重排（可接受）。
+  4. bias −0.0002 / normalBias 0.05 防 acne 与光漏；near 10 / far 800 覆盖背后树石投影。
+- 接收标记补漏：起终点线此前漏 receiveShadow（car 阴影不落在白色横线上）。
+- 排错记录：①update 的 frustumSize 语义首版把全宽当半宽用（测试“frustum applied”抓住）；②lighting.spec 首版有草稿残留断言，重写为整纹素步进 / 吸附误差 ≤texel/2 / 幂等 / 视锥切换四检查 + 穹顶材质断言。
+- 门禁：typecheck / 52 用例（含新增 lighting.spec 2 条）/ build 全过。浏览器人工验收项：ACES 色调观感是否合口味（可调 exposure）、车漆反射效果、移动中车影不再抖动、预览页与游戏页观感一致。

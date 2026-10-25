@@ -34,6 +34,7 @@ description: 'Implementation guidelines for the three.js racing game in the repo
 - 启动页背景预览：`src/ui/TrackPreview.ts`，重新生成/导入赛道或改色后调用 `setTrack`/`setColor` 同步。
 - 自由镜头预览页：`#/preview`（`src/pages/PreviewPage.ts`），复用 `TrackPreview` 的 `freeCamera` 模式（OrbitControls：拖动旋转 / 右键平移 / 滚轮缩放）；支持 `setView('car' | 'scene')` 快速切换赛车/整个场景视角，首页背景预览使用 `initialView: 'car'`。
 - 静态预览（无物理同步）时 `TrackPreview` 会把轮子放到贴地位置（`wheelRadius - CHASSIS_SPAWN_HEIGHT`），避免轮子悬在车身上方。
+- 渲染光影共用管线 `src/render/lighting.ts`（Game 与 TrackPreview 必须都走它，不许各自配灯）：ACES 色管（`applyColorPipeline`）、天空渐变穹顶（`createSkyDome`，雾色=地平线色）、PMREM 环境贴图（`bakeEnvironment`，车金属反射；`scene.environmentIntensity=0.5`）、太阳按**纹素网格对齐**跟随（`createSunFollower`：焦点吸附 0.088m 网格根治阴影抖动；预览页可传视锥宽按 car/scene 视角切换）；改动色调/强度/曝光需两页同步评估。
 
 ## Validation
 
