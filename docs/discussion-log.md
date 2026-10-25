@@ -286,3 +286,9 @@
 - 静音按钮：HUD 右上 🔊/🔇（hud-back 左侧，right:118px），状态存 localStorage racing-audio-muted，刷新保持。
 - vitest 兼容：AudioContext 不存在时（node 环境）全方法 no-op，readMutedPref 有 typeof + try/catch 守卫——实例化不炸（46 用例仍绿）。
 - 门禁：typecheck / 46 用例 / build 全过。浏览器人工验收项：进入游戏听到引擎声随速度/油门变化、撞护栏有闷响+画面震动、漂移有啸叫、🔊 按钮可静音、刷新静音状态保持。
+
+## 2026-10-25 代码分割（用户选定六项中的批 4）
+- vite 8 = rolldown 内核，分块用 **advancedChunks**（不是 rollup 的 manualChunks 语义）；groups 按 node_modules 路径匹配：vendor-three / vendor-cannon 两个独立包。
+- 结果：主入口 55.3KB（gzip 19.2KB，原 >500kB）、vendor-cannon 99.0KB（gzip 28.7KB）、vendor-three 666.3KB（gzip 169.0KB，库本体）；chunkSizeWarningLimit 调至 750 —— vendor-three 独立成包后“>500kB”警告对它已无 actionable 意义（进一步只剩路由级动态 import，游戏单页无意义）。
+- middleware 依赖顺序：index.html 直接引用入口 JS，三个包并行下载；vendor 包内容随依赖版本变化才失效缓存，长期缓存友好。
+- 门禁：build 无警告 / typecheck / 46 用例全过。
