@@ -1,4 +1,4 @@
-import * as CANNON from 'cannon-es';
+﻿import * as CANNON from 'cannon-es';
 import { CAR } from '../config';
 
 export interface VehicleInput {
@@ -34,6 +34,20 @@ const ENGINE_FORCE = 7500;
  *  所有四轮必须每帧都设置：cannon 的 wheel.engineForce 跨帧残留，漏设会让倒车转向后的动力
  *  残留到下一帧前进状态（顺带修掉此潜在 bug）。调 0.35 更后偏、0.6 更前偏。 */
 const FRONT_DRIVE_RATIO = 0.5;
+/** 油门缓入：踏板指令指数平滑速率（/s），约 0.15-0.2s 到 95%——起步不窜、四驱前轴咬合更稳；松开回零更快（×2.5） */
+const THROTTLE_RAMP_RATE = 14;
+/** 刹车偏置：前轮制动系数 0.6、后轮 (2−0.6)=1.4（总容量守恒 4×brake）——后偏压制急刹点头 */
+const BRAKE_BIAS_FRONT = 0.6;
+/** 前/后悬架压缩阻尼：对静态 squat 无效（只抗瞬态，实测差分加强反而伤复杂地形冲击缓冲，已撤销） */
+const FRONT_DAMPING_COMPRESSION = 14;
+/** 抗 squat 前馈：低头反扭矩 = FACTOR × 总驱动力（N·m/N）——推进力作用在接地点（重心下方），
+ *  惯性反作用抬起车头是静态平衡，只能靠主动力矩抵消；接地+前进时施加。0.55=完全抵消（惯性力臂），
+ *  实测：0.45 → 前 90 帧接地率 58%；0.55 会把后轮轴向压到**完全离地**（后驱失效，爬坡倒滑 −9m/s，已弃）。
+ *  结构上限 12000：ΔF = counter/轴距 ≤ 4510N，任何工况下不卸空后轴。 */
+const ATI_SQUAT_FACTOR = 0.45;
+const ATI_SQUAT_MAX = 12000;
+/** 空中角速度阻尼（/s）：四轮全离地时温和衰减角速度——防抬头 PD 空中 bang-bang 振荡，落地更顺 */
+const AIR_ANGULAR_DAMPING = 1.2;
 const REVERSE_FORCE_RATIO = 0.65;
 const REVERSE_MAX_SPEED = 8; // m/s ≈ 29 km/h
 /** 倒车+转向时最高倒车速度：10 m/s ≈ 36 km/h */
@@ -103,6 +117,8 @@ export class CarPhysics {
   /** 本步内最强的一次护栏接触（在 step 后统一施加回弹） */
   private barrierHit: { body: CANNON.Body; normal: CANNON.Vec3; impact: number } | null = null;
   private steerCurrent = 0;
+  /** 油门缓入状态：平滑后的踏板量（0-1，reset 归零） */
+  private throttleActual = 0;
   private drift = false;
 
   constructor() {
@@ -143,7 +159,7 @@ export class CarPhysics {
       maxSuspensionTravel: 0.25,
       frictionSlip: 3.2,
       dampingRelaxation: 6.0,
-      dampingCompression: 14,
+      dampingCompression: FRONT_DAMPING_COMPRESSION,
       maxSuspensionForce: 200000,
       rollInfluence: 0.05,
       axleLocal: new CANNON.Vec3(-1, 0, 0),
@@ -226,6 +242,10 @@ export class CarPhysics {
       : STEER_RETURN_RATE + STEER_SPEED_BONUS * steerSpeedT;
     this.steerCurrent += (targetSteer - this.steerCurrent) * Math.min(1, steerRate * dt);
 
+    // 油门缓入：踏板指令指数平滑后再进入动力计算（起步不窜、四驱前轴咬合更稳）；松油门回零更快
+    const throttleRate = input.throttle !== 0 ? THROTTLE_RAMP_RATE : THROTTLE_RAMP_RATE * 2.5;
+    this.throttleActual += (input.throttle - this.throttleActual) * Math.min(1, throttleRate * dt);
+
     const slipAngle = this.computeSlipAngle();
     const absSpeed = this.chassis.velocity.length();
 
@@ -267,12 +287,12 @@ export class CarPhysics {
 
     // RaycastVehicle 在 right=X(0)/forward=Z(2)/up=Y(1) 配置下，
     // 正发动机力会沿 -Z 推（实测倒车），因此取反：正油门 = 向前(+Z)。
-    let force = -input.throttle * ENGINE_FORCE;
+    let force = -this.throttleActual * ENGINE_FORCE;
     // 转向时不允许无限加速：转向越深动力越低（满舵约 55% 动力；出弯线性恢复）
     if (Math.abs(input.steering) > 0.05) {
       force *= 1 - 0.45 * Math.min(1, Math.abs(input.steering));
     }
-    if (input.throttle > 0) {
+    if (this.throttleActual > 0) {
       const fwdSpeed = this.forwardSpeed();
       // 前进限速 200km/h：接近上限时渐入削减动力，避免惯性超调（在 0.98×上限处完全切断）
       if (fwdSpeed >= FORWARD_MAX_SPEED * 0.85) {
@@ -293,6 +313,22 @@ export class CarPhysics {
         }
       }
       groundNormal.normalize();
+
+      // 抗 squat 前馈：推进力作用于接地点（重心下方），惯性反作用掀起车头（静态平衡，
+      // 悬架差分压缩阻尼无效——实测 21/120 接地率）。施加与总驱动力成比例的低头反扭矩，
+      // 保持前轮接地让四驱前轴在直线也生效；空中不介入（groundCount=0 时跳过）。
+      // 速度门 <30m/s：squat 只在起步/中速大油门真实发生；高速满舵稳态过弯阶段必须关闭，
+      // 否则稳态侧偏翻倍（实测 0.35/0.45 系数下均如此）。
+      if (groundCount > 0 && fwdSpeed < 30) {
+        const totalDrive = 2 * Math.abs(force) * (1 + FRONT_DRIVE_RATIO);
+        const squatCounter = Math.min(ATI_SQUAT_MAX, ATI_SQUAT_FACTOR * totalDrive);
+        const rightAxis = new CANNON.Vec3(1, 0, 0);
+        this.chassis.quaternion.vmult(rightAxis, rightAxis);
+        this.chassis.torque.x += rightAxis.x * squatCounter;
+        this.chassis.torque.y += rightAxis.y * squatCounter;
+        this.chassis.torque.z += rightAxis.z * squatCounter;
+      }
+
       const fwdNow = new CANNON.Vec3(0, 0, 1);
       this.chassis.quaternion.vmult(fwdNow, fwdNow);
       const pitchUp = Math.asin(Math.max(-1, Math.min(1, fwdNow.dot(groundNormal))));
@@ -314,7 +350,7 @@ export class CarPhysics {
       // 倒车限制：更小的加速力 + 最高倒车速度
       // 倒车+转向时给满反向动力，让倒车转弯能实际达到 10 m/s 上限
       const reverseRatio = Math.abs(input.steering) > 0.05 ? 1.0 : REVERSE_FORCE_RATIO;
-      force = -input.throttle * ENGINE_FORCE * reverseRatio;
+      force = -this.throttleActual * ENGINE_FORCE * reverseRatio;
       const reverseMax = Math.abs(input.steering) > 0.05 ? REVERSE_TURN_MAX_SPEED : REVERSE_MAX_SPEED;
       if (this.forwardSpeed() < -reverseMax || this.chassis.velocity.length() > reverseMax) {
         force = 0;
@@ -336,7 +372,18 @@ export class CarPhysics {
       ? (Math.abs(input.steering) > 0.05 || reversing ? ENGINE_BRAKE : COAST_BRAKE)
       : 0;
     const brake = Math.max(input.brake * BRAKE_FORCE, engineBrake);
-    for (let i = 0; i < 4; i++) this.vehicle.setBrake(brake, i);
+    // 刹车偏置：前 0.6 / 后 1.4（总容量守恒 4×brake）——后偏压制急刹点头，同时前轮保留转向抓地
+    this.vehicle.setBrake(brake * BRAKE_BIAS_FRONT, 0);
+    this.vehicle.setBrake(brake * BRAKE_BIAS_FRONT, 1);
+    this.vehicle.setBrake(brake * (2 - BRAKE_BIAS_FRONT), 2);
+    this.vehicle.setBrake(brake * (2 - BRAKE_BIAS_FRONT), 3);
+
+    // 空中姿态阻尼（完全离地时）：温和衰减角速度——防抬头 PD 在空中不会 bang-bang 振荡，落地更顺。
+    // 缓慢（~1.2/s），不影响正常跳跃的抛物线与坡顶空中 PD 的救车能力。
+    if (this.vehicle.wheelInfos.every((w) => !w.isInContact)) {
+      const airDamp = Math.max(0, 1 - AIR_ANGULAR_DAMPING * dt);
+      this.chassis.angularVelocity.scale(airDamp, this.chassis.angularVelocity);
+    }
 
     // 滚转稳定（街机防翻辅助）：接地且车身明显侧倾（up.y 低）时，沿车头方向施加反侧倾力矩。
     // 防止“油门+满舵”过弯或山坡瞬态侧翻（角阻尼 1.0 曾每步清零角速度，掩盖了翻车；
@@ -423,6 +470,7 @@ export class CarPhysics {
     this.chassis.quaternion.copy(quaternion);
     this.chassis.velocity.setZero();
     this.chassis.angularVelocity.setZero();
+    this.throttleActual = 0;
     this.barrierHit = null;
     for (let i = 0; i < this.vehicle.wheelInfos.length; i++) {
       this.vehicle.updateWheelTransform(i);
