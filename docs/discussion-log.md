@@ -351,3 +351,14 @@
 - 新增 docs/resume-highlights.md：一句话定位、技术栈、9 条量化简历要点、数据一览表、不足记录、三个面试讲述故事（阴影纹素对齐 / 梯形转向与测试容差定位 / 先测后调过十字路口）。
 - 数字口径：源码 28 文件 4,475 行；测试 8 spec 56 用例 1,313 行；主入口 55KB（gzip 19KB）；预设 1800/1800/1400m；满舵稳态半径 6.5/7.5/8.2m @ 11.1/14.6/16.6 m/s。
 - 门禁：本次仅文档改动，仍跑 typecheck / test / build 确认无破坏后提交。
+
+## 2026-10-28 终点停音与静音按钮居中
+- 用户验收反馈两条：①终点后声音应该停止；②声音按钮图标没有居中。
+- 停音根因复盘：`Game.finish()` 确实调用了 `audio.setPaused(true)`，但 `setPaused` 只写 `this.paused` 标志；真正把 `engineGain` / `driftGain` 推向 0 的是每帧 `update()` 里的 `silent` 分支，而结算后 `tick()` 不再调用 `audio.update()`（暂停同理），于是循环音停留在最后一帧的增益（引擎低鸣 + 可能的漂移啸叫）一直播下去。
+  - 修复（src/audio/engine.ts）：`setPaused(true)` 时直接用 `setTargetAtTime(0, t, 0.06)` 把两条循环音增益推向 0，不依赖下一帧；`setPaused(false)` 不动增益，交给下一帧 `update()` 按当前车速/油门淡入，避免恢复瞬间先静音再跳变。暂停与终点共用该路径，一并修掉暂停态的潜伏问题。
+  - 一次性音（碰撞 `impact()`）不受影响：它本来就是 `src.stop()` 自动结束，且 `paused || muted` 时直接 return。
+- 图标不居中根因：`#hud-audio` 复用 `.btn`，而 `.btn` 为 `display:inline-block; padding:10px 16px`；在 44px 定宽里左右内边距吃掉 32px，只剩 12px 内容区，emoji 字形被挤偏且垂直方向受行高与默认基线影响。
+  - 修复（src/styles.css）：`.hud-audio` 改为 `inline-flex` + `align-items:center` + `justify-content:center` + `padding:0` + `line-height:1`，显式 `width:44px; height:42px`（与「返回首页」按钮视觉同高）。
+- dev server（5199）实测 DOM：`display:flex`、`alignItems:center`、`justifyContent:center`、`padding:0px`、`lineHeight:18px`、尺寸 44×42、文本 🔊——布局层面已居中；像素级截图受环境限制（需要可见桌面窗口）未能采集，最终观感由用户本机确认。
+- 门禁：typecheck / 56 用例 / build 全绿（改动仅音频与 CSS，无测试影响）。
+- 附注：dev server 控制台仍见 `THREE.Clock` 弃用提示（建议 `THREE.Timer`）与 WebGL `X4122` 精度告警（驱动/shader 编译期噪声，不影响运行），记为后续可选清理项。

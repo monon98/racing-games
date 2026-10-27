@@ -137,6 +137,15 @@ export class AudioSystem {
 
   setPaused(paused: boolean): void {
     this.paused = paused;
+    // 暂停/结算后主循环不再调用 update()，只置标志会留下最后一帧的引擎/漂移循环音——
+    // 因此暂停时立即把循环音增益推向 0（终点冲线同样走这里）；恢复时交给下一帧 update() 按
+    // 当前速度/油门自然淡入。
+    if (!paused) return;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    if (this.engineGain) this.engineGain.gain.setTargetAtTime(0, t, 0.06);
+    if (this.driftGain) this.driftGain.gain.setTargetAtTime(0, t, 0.06);
   }
 
   setMuted(muted: boolean): void {

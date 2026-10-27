@@ -484,7 +484,15 @@ select {
   position: absolute;
   top: 18px;
   right: 118px;
+  /* 图标居中：.btn 默认 inline-block + padding:10px 16px 会在 44px 定宽里把 emoji 挤偏；
+     改为 flex 居中、去内边距、行高 1，高度与「返回首页」按钮一致 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 44px;
+  height: 42px;
+  padding: 0;
+  line-height: 1;
   pointer-events: auto;
   font-size: 18px;
   background: rgb(16 20 27 / 0.72);
