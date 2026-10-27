@@ -21,7 +21,7 @@
 - 路面横向右向量 = `(t.z, 0, -t.x)` 归一化；两侧偏移 = 局部半宽 `halfWidths[i]`（直道 = 基础宽/2，弯道按曲率最多加宽 40%，见 `computeHalfWidths`，平滑处理）。
 - 路面 BufferGeometry：每个采样点两个顶点（左/右），闭合带状三角面（法线向上），存入 `roadGeometry` 供导出复用；复杂模式下左右边沿各自采样地形高度并抬高 `ROAD_TERRAIN_OFFSET=0.05m`（贴地且不被地形遮挡）。
 - 起终点线：白色薄盒横跨路面（宽度取 `points[0]` 的局部宽），按切线朝向旋转。
-- 护栏：每 3 个采样点一段，`BoxGeometry(BARRIER_THICKNESS, barrierHeight, segLen)` 置于该点局部半宽外侧 0.05m；段长 ×1.4 重叠防弯道缝隙；视觉与 cannon-es 静态 Box 一一对应；厚度 0.8m、高度 1.1 × 车高（1.32m，车缩小后）。
+- 护栏：每 3 个采样点一段，`BoxGeometry(BARRIER_THICKNESS, barrierHeight, segLen)` 置于该点局部半宽外侧 0.05m；段长 ×1.4 重叠防弯道缝隙；视觉与 cannon-es 静态 Box 一一对应；厚度 0.8m、高度 1.5 × 车高（1.8m，2026-10-28 由 1.32m 加高）。物理盒在可见内侧面向外扩 `BARRIER_COLLIDER_DEPTH_EXTRA/2`（半厚 `t/2+extra/2`、中心外移 `extra/2`）；**静态 Body 设置 position/quaternion 后必须 `updateAABB()`**。
 - 脱轨判定使用 `BuiltTrack.halfWidths[idx]`（局部半宽）+ 余量。
 
 ## 地面

@@ -13,7 +13,7 @@ description: 'Implementation guidelines for the three.js racing game in the repo
 
 - 包管理一律用 `pnpm`；验证命令 `pnpm typecheck` 与 `pnpm build` 必须通过。
 - TypeScript `strict`；公共数据类型集中在 `src/types.ts`；游戏常量集中在 `src/config.ts`，改动前先查。
-- 尺寸比例固定：车宽 1.7m、车高 1.2m、车长 3.6m（2026-10-20 整车缩小，原 2.0/1.4/4.2），赛道基础宽保持 12.0m（`ROAD_WIDTH_MULTIPLIER = 12/1.7`），弯道按曲率最多再加宽 40%，护栏高 = 1.1 × 车高（1.32m），1 单位 = 1m。
+- 尺寸比例固定：车宽 1.7m、车高 1.2m、车长 3.6m（2026-10-20 整车缩小，原 2.0/1.4/4.2），赛道基础宽保持 12.0m（`ROAD_WIDTH_MULTIPLIER = 12/1.7`），弯道按曲率最多再加宽 40%，护栏高 = 1.5 × 车高（1.8m，2026-10-28 加高），1 单位 = 1m。
 - 单活动赛道：IndexedDB 只存一条，重新生成/导入会清除旧排行榜；排行榜为单圈计时升序前 10。
 - 汽车与赛道必须代码生成；汽车同一模型函数只接受颜色参数。
 - 每个里程碑完成后更新 `docs/progress.md`；需求变化先更新 `docs/requirements.md`。

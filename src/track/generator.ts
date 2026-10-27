@@ -490,16 +490,19 @@ function buildBarriers(
       mesh.receiveShadow = true;
       visual.push(mesh);
 
-      // 碰撞盒向路外方向加厚：内侧面位置不变（碰撞反馈位置与可见面一致），只向外扩隐形体积，
+      // 碰撞盒向路外方向加厚：内侧面位置与可见内侧面重合，只向外扩隐形体积，
       // 高速下未接住的接触体在下一步仍与护栏重叠，求解器持续修正（防高速穿墙弹性手段）
       const outward = new THREE.Vector3(mid.x - (points[a].x + points[b].x) / 2, 0, mid.z - (points[a].z + points[b].z) / 2);
       if (outward.lengthSq() > 0) outward.normalize();
       const body = new CANNON.Body({
         mass: 0,
-        shape: new CANNON.Box(new CANNON.Vec3(BARRIER_THICKNESS / 2 + BARRIER_COLLIDER_DEPTH_EXTRA, barrierHeight / 2, len / 2)),
+        shape: new CANNON.Box(new CANNON.Vec3(BARRIER_THICKNESS / 2 + BARRIER_COLLIDER_DEPTH_EXTRA / 2, barrierHeight / 2, len / 2)),
       });
       body.position.set(mid.x + outward.x * (BARRIER_COLLIDER_DEPTH_EXTRA / 2), mid.y + barrierHeight / 2, mid.z + outward.z * (BARRIER_COLLIDER_DEPTH_EXTRA / 2));
       body.quaternion.setFromEuler(0, yaw, 0);
+      // 静态体不会 integrate，构造期 AABB 固定在原点且之后不会自动刷新；
+      // SAPBroadphase 按错误 AABB 排序会跳过碰撞对（表现为第一次脱轨后直接穿墙）。
+      body.updateAABB();
       bodies.push(body);
 
     }
@@ -523,15 +526,16 @@ function buildBarriers(
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       visual.push(mesh);
-      // 同上：碰撞盒向路外加厚，内侧面（碰撞反馈位置）不变
+      // 同上：碰撞盒向路外加厚，内侧面（碰撞反馈位置）与可见内侧面重合
       const outward = new THREE.Vector3(cx - p.x, 0, cz - p.z);
       if (outward.lengthSq() > 0) outward.normalize();
       const body = new CANNON.Body({
         mass: 0,
-        shape: new CANNON.Box(new CANNON.Vec3(BARRIER_THICKNESS / 2 + BARRIER_COLLIDER_DEPTH_EXTRA, barrierHeight / 2, len / 2)),
+        shape: new CANNON.Box(new CANNON.Vec3(BARRIER_THICKNESS / 2 + BARRIER_COLLIDER_DEPTH_EXTRA / 2, barrierHeight / 2, len / 2)),
       });
       body.position.set(cx + outward.x * (BARRIER_COLLIDER_DEPTH_EXTRA / 2), cy + barrierHeight / 2, cz + outward.z * (BARRIER_COLLIDER_DEPTH_EXTRA / 2));
       body.quaternion.setFromEuler(0, yaw, 0);
+      body.updateAABB();
       bodies.push(body);
     }
   };

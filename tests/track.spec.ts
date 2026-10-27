@@ -99,7 +99,7 @@ describe('track generation', () => {
       Math.max(...built.halfWidths) > built.roadWidth / 2 + 0.5,
       `max halfWidth=${Math.max(...built.halfWidths).toFixed(2)}m base=${(built.roadWidth / 2).toFixed(2)}m`,
     );
-    check('barrierHeight = 1.32', Math.abs(built.barrierHeight - 1.32) < 1e-6, String(built.barrierHeight));
+    check('barrierHeight = 1.8', Math.abs(built.barrierHeight - 1.8) < 1e-6, String(built.barrierHeight));
     check('totalLength in [1500, 2700]', built.totalLength > 1500 && built.totalLength < 2700, String(built.totalLength.toFixed(0)));
     // 新规则：不要求直线，但不能突左突右（相邻采样方向变化小）、不自交
     check('simple no zigzag', maxHeadingTurn(points, built.tangents) < 0.3, `max turn=${maxHeadingTurn(points, built.tangents).toFixed(3)}rad`);
@@ -199,6 +199,54 @@ describe('track generation', () => {
     check('preset all points on ground plane', built.points.every((p) => Math.abs(p.y) < 1e-9));
     check('preset roadWidth = 12.0', Math.abs(built.roadWidth - 12.0) < 1e-6, String(built.roadWidth));
     check('preset has barriers', built.physics.barriers.length > 20, String(built.physics.barriers.length));
+  });
+
+  it('barrier AABBs match their world transforms (static bodies)', () => {
+    for (const preset of PRESET_TRACKS) {
+      const built = buildTrackForMode('preset', 42, preset.id);
+      let allContained = true;
+      let aligned = true;
+      for (const b of built.physics.barriers) {
+        if (b.shapes[0] instanceof CANNON.Plane) continue;
+        const box = b.shapes[0] as CANNON.Box;
+        // 静态体 AABB 不会自动刷新：必须覆盖旋转后盒子的 8 个世界角点
+        for (const sx of [-1, 1]) {
+          for (const sy of [-1, 1]) {
+            for (const sz of [-1, 1]) {
+              const local = new CANNON.Vec3(
+                box.halfExtents.x * sx,
+                box.halfExtents.y * sy,
+                box.halfExtents.z * sz,
+              );
+              const world = b.quaternion.vmult(local, new CANNON.Vec3());
+              world.vadd(b.position, world);
+              const bb = b.aabb;
+              if (
+                world.x < bb.lowerBound.x - 1e-3 ||
+                world.y < bb.lowerBound.y - 1e-3 ||
+                world.z < bb.lowerBound.z - 1e-3 ||
+                world.x > bb.upperBound.x + 1e-3 ||
+                world.y > bb.upperBound.y + 1e-3 ||
+                world.z > bb.upperBound.z + 1e-3
+              ) {
+                allContained = false;
+              }
+            }
+          }
+        }
+        // AABB 必须围绕 body 位置（构造期 AABB 在原点的问题会在这里暴露）
+        if (
+          b.position.x < b.aabb.lowerBound.x ||
+          b.position.x > b.aabb.upperBound.x ||
+          b.position.z < b.aabb.lowerBound.z ||
+          b.position.z > b.aabb.upperBound.z
+        ) {
+          aligned = false;
+        }
+      }
+      check(`${preset.id}: barrier AABB contains rotated corners`, allContained);
+      check(`${preset.id}: barrier AABB centered on body`, aligned);
+    }
   });
 
   it('spawn points are clear of barriers', () => {

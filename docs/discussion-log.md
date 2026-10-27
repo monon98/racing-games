@@ -362,3 +362,21 @@
 - dev server（5199）实测 DOM：`display:flex`、`alignItems:center`、`justifyContent:center`、`padding:0px`、`lineHeight:18px`、尺寸 44×42、文本 🔊——布局层面已居中；像素级截图受环境限制（需要可见桌面窗口）未能采集，最终观感由用户本机确认。
 - 门禁：typecheck / 56 用例 / build 全绿（改动仅音频与 CSS，无测试影响）。
 - 附注：dev server 控制台仍见 `THREE.Clock` 弃用提示（建议 `THREE.Timer`）与 WebGL `X4122` 精度告警（驱动/shader 编译期噪声，不影响运行），记为后续可选清理项。
+
+## 2026-10-28 护栏加高 + 轨道判定加宽 + 出轨后碰撞失效修复
+- 用户反馈：①加高轨道（护栏）高度；②轨道宽度 UI 可不变，但加大判定；③车出轨一次后，车与轨道的碰撞判断失效，反复出轨。
+- 复现（最小物理场景，`windmill-corridor` 发卡弯 idx 720）：先把车瞬移到路外 20m 模拟第一次脱轨，满舵全油门 23 帧后按 `findSafeSpawnIndex` 重生；随后 12 秒内每约 128 帧再次脱轨，共 6 次，末速约 14.8m/s，`onBarrierCollide` 触发 **0** 次——车直接从护栏位置穿出。
+- 根因：**静态护栏 Body 的 AABB 从未按世界坐标刷新**。`new CANNON.Body({ shape })` 在构造时 `addShape → updateMassProperties → updateAABB`，此时 `position` 仍是原点；随后代码才 `body.position.set(...)` / `quaternion.setFromEuler(...)`。静态体不 integrate，`aabbNeedsUpdate` 保持 false，AABB 永远停在原点。
+  - `SAPBroadphase` 用 `aabb.lowerBound.x` 排序、用 `checkBounds`（position ± boundingRadius）提前 break；AABB 在原点导致排序错位，pair 循环在错误位置提前结束，护栏 pair 根本不会进入 narrowphase。
+  - 实测：护栏 body 491 位置 `(-140.62, 0.66, -78.58)`，AABB 却是 `lower=(-1.2,-0.66,-1.69) / upper=(1.2,0.66,1.69)`；`chassisIdx=1`、`barrier491Idx=493`，pair 循环 `breakAt=2`；穿墙帧 `aabbOverlap=false`、`worldContacts=0`。把护栏 `updateAABB()` 提前后，同一路径在 11-12m/s 被护栏接住并回弹。
+- 修复：
+  1. `buildBarriers()` 两处（跨点长段 / 弯心短段）在设置 position/quaternion 后显式 `body.updateAABB()`；`CarPhysics.addGround()` 再做一次防御性 `updateAABB()`。
+  2. `BARRIER_HEIGHT_FACTOR` 1.1 → 1.5（护栏 1.32 → **1.8m**）。
+  3. `BARRIER_COLLIDER_DEPTH_EXTRA` 0.8 → 1.2，并把半厚公式从 `t/2 + extra` 改为 `t/2 + extra/2`（中心仍外移 `extra/2`）。旧公式内侧面实际侵入路面 0.35m，与“只向外加厚”注释相反；新公式内侧面与可见内侧面重合，纯向外扩，等效行驶宽度每侧回补 0.35m。
+  4. `OFFTRACK_MARGIN` 0.5 → **1.2m**（视觉路面/护栏宽度不动），满足“宽度 UI 不变、判定加宽”。
+  5. `CarPhysics.reset()` 清零 `steerCurrent`（旧实现只清 `steerVel`，重生时仍按方向键会带着满舵出弯）、刷新底盘 AABB 并 `wakeUp()`；`Game` 出生朝向从 `tangents[0]` 改为实际安全出生点 `tangents[startIdx]`。
+- 回归防护：
+  - `tests/track.spec.ts`：barrierHeight 断言改 1.8；新增三预设“护栏 AABB 必须包含旋转后的 8 个角点且围绕 body 位置”。
+  - 新增 `tests/barrier-respawn.spec.ts`：发卡弯先冲出赛道一次 → 重生 → 满舵全油门 3 秒，要求重生后 `steerCurrent=0`、护栏碰撞 >0、脱轨重生 0 次、横向越界始终小于加宽后的判定余量。
+- 门禁：`pnpm typecheck` / 58 用例 / `pnpm build` 全绿。实机手感与护栏高度观感仍需用户本机浏览器验收。
+

@@ -17,16 +17,18 @@ export const CURVE_WIDEN_STRENGTH = 16;
 /** 弯道加宽最大比例（最急弯处基础宽的 1+该值 倍） */
 export const CURVE_WIDEN_MAX = 0.4;
 
-/** 护栏高度 = 车高 × 该系数（原需求一半；用户后续要求调高，取 1.1 → 1.54m；车缩小后 1.32m） */
-export const BARRIER_HEIGHT_FACTOR = 1.1;
+/** 护栏高度 = 车高 × 该系数（原需求一半；用户后续要求调高，取 1.1 → 车缩小后 1.32m；
+ *  2026-10-28 用户再次要求加高防跳越：1.5 → 1.8m） */
+export const BARRIER_HEIGHT_FACTOR = 1.5;
 
 /** 护栏厚度（加大碰撞判定范围，防高速穿透） */
 export const BARRIER_THICKNESS = 0.8;
 
-/** 护栏**碰撞盒**向远离路面方向额外加厚的深度（可见面与前内侧面不变）：
+/** 护栏**碰撞盒**向远离路面方向额外加厚的深度（内侧面与可见内侧面重合，只向外扩）：
  *  高速 55m/s 下每物理步位移 ≈0.92m，更深的外侧碰撞体让未接住的接触面在下一步仍保持重叠，
- *  求解器持续修正而不是让车身滑过薄体；纯隐形体积（埋在路外），不改变碰撞反馈位置。 */
-export const BARRIER_COLLIDER_DEPTH_EXTRA = 0.8;
+ *  求解器持续修正而不是让车身滑过薄体；纯隐形体积（埋在路外），不改变碰撞反馈位置。
+ *  2026-10-28 0.8 → 1.2（修复旧公式把内侧面侵入路面的 bug 后，纯向外再加厚）。 */
+export const BARRIER_COLLIDER_DEPTH_EXTRA = 1.2;
 
 /** 每次重生固定时间惩罚（ms） */
 export const TIME_PENALTY_MS = 3000;
@@ -40,8 +42,10 @@ export const FLIP_ANGLE_DEG = 70;
 /** 翻车持续判定时间（ms） */
 export const FLIP_HOLD_MS = 1000;
 
-/** 脱轨判定：超出路面半宽后的额外余量（m） */
-export const OFFTRACK_MARGIN = 0.5;
+/** 脱轨判定：超出路面半宽后的额外余量（m）
+ *  2026-10-28 用户要求“轨道宽 UI 不变、判定加宽”：0.5 → 1.2，
+ *  视觉路面/护栏仍按 12m 基础宽生成，仅放宽脱轨判定。 */
+export const OFFTRACK_MARGIN = 1.2;
 
 /** 脱轨持续判定时间（ms） */
 export const OFFTRACK_HOLD_MS = 400;

@@ -120,7 +120,7 @@ export class Game {
 
     const startIdx = findSafeSpawnIndex(track, 0);
     const start = track.points[startIdx];
-    const tangent = track.tangents[0].clone();
+    const tangent = track.tangents[startIdx].clone();
     tangent.y = 0;
     tangent.normalize();
     const startQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), tangent);

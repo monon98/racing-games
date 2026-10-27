@@ -213,6 +213,9 @@ export class CarPhysics {
   }
 
   addGround(body: CANNON.Body): void {
+    // 防御性刷新：静态体创建后手动设置 position/quaternion 时 AABB 不会自动更新，
+    // 错误的 AABB 会让 SAPBroadphase 排序错位并跳过碰撞对（穿墙/穿地）。
+    body.updateAABB();
     this.world.addBody(body);
   }
 
@@ -503,7 +506,15 @@ export class CarPhysics {
     this.chassis.quaternion.copy(quaternion);
     this.chassis.velocity.setZero();
     this.chassis.angularVelocity.setZero();
+    // 传送后必须刷新 AABB：动态体虽然每步 integrate 会刷新，但重生当帧的 broadphase
+    // 仍用旧位置 AABB，可能漏掉与重生点护栏的碰撞对。
+    this.chassis.aabbNeedsUpdate = true;
+    this.chassis.updateAABB();
+    this.chassis.wakeUp();
     this.throttleActual = 0;
+    // 旧实现只清 steerVel 不清 steerCurrent：玩家重生时仍按着方向键会带着满舵出弯，
+    // 在发卡弯直接再次冲出赛道，形成“反复出轨”的观感。
+    this.steerCurrent = 0;
     this.steerVel = 0;
     this.barrierHit = null;
     for (let i = 0; i < this.vehicle.wheelInfos.length; i++) {
