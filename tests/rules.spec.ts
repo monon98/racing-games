@@ -1,5 +1,6 @@
 import { describe, it } from 'vitest';
 import { updateLapProgress } from '../src/game/lapProgress';
+import { respawnDistancePenaltyM } from '../src/game/penalties';
 import { isWrongWay } from '../src/game/wrongWay';
 import { randomPlayerName } from '../src/utils/random';
 import { check } from './helpers';
@@ -13,6 +14,14 @@ describe('lap progress', () => {
     check('mid-lap no crossing', !mid.crossedLine && Math.abs(mid.completedDistance - 600) < 1e-6, JSON.stringify(mid));
     const back = updateLapProgress(300, 400, L, 600);
     check('backward no progress', !back.crossedLine && back.dS < 0 && Math.abs(back.completedDistance - 600) < 1e-6, JSON.stringify(back));
+  });
+});
+
+describe('respawn distance penalty', () => {
+  it('uses a 10m floor and takes actual rollback when larger', () => {
+    check('small rollback uses 10m floor', respawnDistancePenaltyM(100, 95) === 10);
+    check('zero/negative rollback uses 10m floor', respawnDistancePenaltyM(100, 105) === 10);
+    check('larger rollback uses actual distance', respawnDistancePenaltyM(100, 63) === 37);
   });
 });
 

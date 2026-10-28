@@ -18,6 +18,7 @@ import { findSafeSpawnIndex, type BuiltTrack } from '../track/generator';
 import { createHUD, type HudRefs } from '../ui/hud';
 import { drawMinimap } from '../ui/minimap';
 import { updateLapProgress } from './lapProgress';
+import { respawnDistancePenaltyM } from './penalties';
 import { isWrongWay } from './wrongWay';
 
 export interface GameOptions {
@@ -269,9 +270,8 @@ export class Game {
     const state = this.physics.getState();
     const idx = findSafeSpawnIndex(this.track, this.nearestIndex(state.position));
     const respawnS = this.track.lengths[idx];
-    if (respawnS < this.lastS) {
-      this.distancePenaltyM += this.lastS - respawnS;
-    }
+    // 距离惩罚下限 10m：小回退也按 10m 计；实际回退更远时按实际距离累加。
+    this.distancePenaltyM += respawnDistancePenaltyM(this.lastS, respawnS);
     this.timePenaltyMs += TIME_PENALTY_MS;
 
     const p = this.track.points[idx];

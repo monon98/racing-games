@@ -36,6 +36,9 @@ export const TIME_PENALTY_MS = 3000;
 /** 距离惩罚折算秒数（秒/米） */
 export const DISTANCE_PENALTY_SEC_PER_M = 0.1;
 
+/** 单次重生距离惩罚下限（m）：进度回退不足 10m 也按 10m 计；回退更远则按实际距离累加。 */
+export const MIN_DISTANCE_PENALTY_M = 10;
+
 /** 翻车判定：车身上向量与竖直方向夹角（度） */
 export const FLIP_ANGLE_DEG = 70;
 

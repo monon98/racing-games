@@ -11,6 +11,6 @@
 | 赛道格式 | GLTF 2.0（.glb 导出；.glb/.gltf 导入） | 中心线等赛道数据写入 userData/extras 随 GLB 单文件往返 |
 | 小地图 | 2D Canvas | 俯视投影绘制赛道轮廓+车辆，比第二视角 3D 渲染更轻、更清晰 |
 | 路由 | hash 路由 | `#/start` / `#/game` / `#/preview`，无需服务器配置，静态部署即可 |
-| 测试 | vitest | 9 个 spec（track/physics/gltf/rules/barrier-collision/barrier-respawn/lighting/steer-feel/crossing）+ helpers，58 个用例；`pnpm test` 全量，`pnpm test:track/physics/gltf/rules` 针对性运行 |
+| 测试 | vitest | 9 个 spec（track/physics/gltf/rules/barrier-collision/barrier-respawn/lighting/steer-feel/crossing）+ helpers，59 个用例；`pnpm test` 全量，`pnpm test:track/physics/gltf/rules` 针对性运行 |
 | 音效 | WebAudio 纯合成 | 零音频素材依赖：引擎声双锯齿失谐随速度变调、碰撞带通噪声、漂移啸叫；AudioContext 在用户手势内初始化，暂停/结算静音 |
 | 渲染 | three.js ACES + PMREM + 纹素对齐阴影 | 统一管线 `src/render/lighting.ts`（Game/预览页共用）：天空渐变穹顶与环境反射、太阳焦点吸附阴影纹素网格消除移车抖动；rolldown `advancedChunks` 拆 vendor 包 |
